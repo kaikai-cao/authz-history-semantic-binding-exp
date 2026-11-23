@@ -1,0 +1,46 @@
+{
+  "schema": "D3-01-vectors-v1",
+  "note": "Fixed vectors from the Rust reference implementation; event encoding uses 8-byte BE length prefix, SHA-256; roots use Poseidon P128Pow5T3 over Pallas base field.",
+  "tree_depth": 12,
+  "event_vectors": [
+    {
+      "id": "grant-root",
+      "encoding_hex": "000000000000000b44332d4556454e542d7631013c89ac7e81158c98fd7fc4dcac726fd64ea9c4af81f1ad6393ea6221b604c5505634ab69a1f0b8ba4efba7a3c716a975366830feca51d289497c76397b1b25ea0b1d746db821690b6e284c51f38e954c396230d99e51f30fe06b73ed364c81b8096abab1fe6b93f41174807bedfb49e2011770d18d08374bef03b421e173b2f20000000000000007000000000000000001",
+      "digest_hex": "108b9e16c40f2bbd4ba84cf2008c1bffcf0e03245b946f04df2f76d602095920"
+    },
+    {
+      "id": "grant-child",
+      "encoding_hex": "000000000000000b44332d4556454e542d7631018095eaf43478a7498973355f1259624259fee79dd05ad7e784ffc0f5a6d3e7ea0b1d746db821690b6e284c51f38e954c396230d99e51f30fe06b73ed364c81b8a8064175a4f17df9237393795fe00730401869d58bd90e0df9e1e3648c2d6cb0096abab1fe6b93f41174807bedfb49e2011770d18d08374bef03b421e173b2f20000000000000003013c89ac7e81158c98fd7fc4dcac726fd64ea9c4af81f1ad6393ea6221b604c5500000000000000002",
+      "digest_hex": "9184566d4ac3e1418c03b410e3e41d0ede326975cd4c5b9874e5219034d9aaa4"
+    },
+    {
+      "id": "revoke",
+      "encoding_hex": "000000000000000b44332d4556454e542d7631023c89ac7e81158c98fd7fc4dcac726fd64ea9c4af81f1ad6393ea6221b604c5505634ab69a1f0b8ba4efba7a3c716a975366830feca51d289497c76397b1b25ea0000000000000003",
+      "digest_hex": "21ff94ff764da41dba7af316da88079c6c30b1f8e8d481a487c2fd04115a4312"
+    }
+  ],
+  "histories": [
+    {
+      "name": "h3-direct",
+      "policy": "DIRECT_ONLY",
+      "event_count": 3,
+      "batch_digest_hex": "e190d765a3015f6415bf0d03b82c5212f3a37b61e84b3fe93d46d104ee8992b8",
+      "grant_root_hex": "1a0996056828d76a8ba1b24a6a48862d6575770549babd9d4af10b2032217f1e",
+      "revoke_root_hex": "169fe582a2d9e3fb4f11bed532ea3b4810f646afffb4397712470d7e27abec1b",
+      "state_summary_hex": "5196e1bc2b5e7b4d2476702dab976ac193d763b2e74c5b396d2412f30ce7479c",
+      "statement_digest_hex": "83b0e1871bb776425fa433d324638e3dc66da3f566a9d765db8d88107a48face",
+      "statement_size_bytes": 242
+    },
+    {
+      "name": "h3-cascade",
+      "policy": "CASCADE",
+      "event_count": 3,
+      "batch_digest_hex": "e190d765a3015f6415bf0d03b82c5212f3a37b61e84b3fe93d46d104ee8992b8",
+      "grant_root_hex": "fc42ef4cdfc171a2b82ed6fcf8b3712d881668ff177e57c6b43553ff92503907",
+      "revoke_root_hex": "9499575e52865f56ed52c3dd705c385678cb300e7182b34763f0fd6d73b8f239",
+      "state_summary_hex": "fbe8a271ccc7f43990c6388a3b9a923fb825eac0046a35fb97cb8740c4dc7821",
+      "statement_digest_hex": "00daca590a741b0d1069d59c1e242fe9ff0beea4d683fa626375a9215eaf2676",
+      "statement_size_bytes": 242
+    }
+  ]
+}
