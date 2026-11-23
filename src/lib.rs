@@ -17,6 +17,7 @@ pub mod event;
 pub mod grant_tree;
 pub mod history;
 pub mod policy;
+pub mod reference;
 pub mod reference_model;
 pub mod revoke_tree;
 pub mod state;
