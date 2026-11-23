@@ -12,6 +12,10 @@ pub mod c_constants;
 pub mod c_types;
 pub mod circuit;
 pub mod constants;
+pub mod e_circuit;
+pub mod e_constants;
+pub mod e_types;
+pub mod e_types_host;
 pub mod types;
 
 pub use b_circuit::{TransitionCircuitB, TransitionConfigB};
@@ -31,6 +35,13 @@ pub use constants::{
     batch_pad, circuit_spec_digest, d_batch, d_state, decode_field_i, encode_field_i, policy_id,
     transition_version, K, MAX_EVENTS, PALLAS_P_BE,
 };
+pub use e_circuit::{TransitionCircuitE, TransitionConfigE};
+pub use e_constants::{K_E, MAX_ACTIVE_EVENTS};
+pub use e_types::{
+    build_scenario_e, final_roots_e, grant_event_commitment_e, revoke_event_commitment_e,
+    EventSpecE, EventWitnessE, TransitionWitnessE,
+};
+pub use e_types_host::blank_e;
 pub use types::{
     host_roundtrip_check, sample_witness, TransitionInstances, TransitionPublicInputs,
     TransitionWitness,
