@@ -26,7 +26,25 @@
 - 内部节点 `Poseidon(D_NODE, left, right)`。
 - Poseidon 参数 P128Pow5T3，Pallas base field，与 D2-A 电路同族；域标签前缀为 `D3-`
   （**刻意区别于 D2-A 的 `D2A-label-v1`，见未解决问题**）。
-- 叶子槽位由 id 的 field 编码高位决定，线性探测解决冲突，保证不同 id 不共享叶子。
+
+### 规范性叶子槽位分配（EXP-D3-01-R1）
+
+原始实现的线性探测按**插入顺序**分配槽位：两个 id 初始槽位冲突时，先插入者占据该槽，
+后插入者顺延。因此相同记录集合在不同插入顺序下得到不同根。R1 改为以下规范性规则
+（`src/grant_tree.rs::canonical_assignment`，GR/RR 共用）：
+
+1. 令 `S` 为当前存在的完整 id 集合，按 32 字节规范字节序排序（`BTreeSet` 迭代序）；
+2. 对 `id ∈ S`，初始槽位 `initial_slot(id) = low_bits(SHA256(D3-SLOT-v1 ‖ 8B(len) ‖ id))`，
+   即全 32 字节 id 经独立域标签哈希后取低 `depth` 位；
+3. 按排序顺序为每个 id 分配从初始槽位起第一个未占用的槽位（环形线性探测）；
+4. `id → slot` 是 `S` 的纯函数，与插入历史无关，且保持单射；全满时返回
+   `TreeError::CapacityExhausted`（转换为 `RuleError`/`StatementError` 的稳定错误码
+   `TREE_CAPACITY_EXHAUSTED`），不静默覆盖叶子、不 panic。
+
+区分离散规则：初始槽位只用于探测起点，**不单独决定身份**；不同 id 即使初始槽位相同，
+也会按规范顺序获得不同最终槽位，`assigned` 映射在每一步都保持单射。
+B 路径仍为真增量：`try_upsert` 只重算轻量的 id→slot 映射（无 Poseidon 调用），
+并对值发生变化的槽位重算 O(depth) 节点路径，不整体重建 Merkle 树。
 
 ## 3. 转换规则 T(S, e)
 

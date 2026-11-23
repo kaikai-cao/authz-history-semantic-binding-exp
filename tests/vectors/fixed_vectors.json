@@ -25,10 +25,10 @@
       "policy": "DIRECT_ONLY",
       "event_count": 3,
       "batch_digest_hex": "e190d765a3015f6415bf0d03b82c5212f3a37b61e84b3fe93d46d104ee8992b8",
-      "grant_root_hex": "1a0996056828d76a8ba1b24a6a48862d6575770549babd9d4af10b2032217f1e",
-      "revoke_root_hex": "169fe582a2d9e3fb4f11bed532ea3b4810f646afffb4397712470d7e27abec1b",
+      "grant_root_hex": "99fec376a5dbe3ac2a9ef976a042e903e7a9ae8c728ae980facdb57478646827",
+      "revoke_root_hex": "77b50fd3cbf780968ec31d402632c4c4fc1fdaf2c6b58c28dcdbf079c647aa1c",
       "state_summary_hex": "5196e1bc2b5e7b4d2476702dab976ac193d763b2e74c5b396d2412f30ce7479c",
-      "statement_digest_hex": "83b0e1871bb776425fa433d324638e3dc66da3f566a9d765db8d88107a48face",
+      "statement_digest_hex": "9559f785c0bbb9fc687a21d9f139263d0bd7b9d0d80d2b5212744807b342a006",
       "statement_size_bytes": 242
     },
     {
@@ -36,10 +36,10 @@
       "policy": "CASCADE",
       "event_count": 3,
       "batch_digest_hex": "e190d765a3015f6415bf0d03b82c5212f3a37b61e84b3fe93d46d104ee8992b8",
-      "grant_root_hex": "fc42ef4cdfc171a2b82ed6fcf8b3712d881668ff177e57c6b43553ff92503907",
-      "revoke_root_hex": "9499575e52865f56ed52c3dd705c385678cb300e7182b34763f0fd6d73b8f239",
+      "grant_root_hex": "de85ca383f0a104c14a44c60afd5ed34743101de3e359e69caf60f074d11ee27",
+      "revoke_root_hex": "7ddd6cd183332a3d0997370e9b4fe1f58a7a992349d9fe1b64c0f103c5d41f32",
       "state_summary_hex": "fbe8a271ccc7f43990c6388a3b9a923fb825eac0046a35fb97cb8740c4dc7821",
-      "statement_digest_hex": "00daca590a741b0d1069d59c1e242fe9ff0beea4d683fa626375a9215eaf2676",
+      "statement_digest_hex": "1e328a138abcb73fc114bcce76279789632d2e91b32207aa851f8c32fa147009",
       "statement_size_bytes": 242
     }
   ]

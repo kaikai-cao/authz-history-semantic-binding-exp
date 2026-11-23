@@ -1,0 +1,24 @@
+   Compiling authz-history-semantic-binding-exp v0.1.0 (D:\Research\authz-history-semantic-binding-exp)
+    Finished `release` profile [optimized] target(s) in 3.47s
+     Running `target\release\benchmark.exe`
+n=16 run=1 replay=570.264ms incremental=587.067ms
+n=16 run=2 replay=574.099ms incremental=581.543ms
+n=16 run=3 replay=577.047ms incremental=581.605ms
+n=16 run=4 replay=577.530ms incremental=568.160ms
+n=16 run=5 replay=576.441ms incremental=573.833ms
+n=64 run=1 replay=631.941ms incremental=629.977ms
+n=64 run=2 replay=624.015ms incremental=637.677ms
+n=64 run=3 replay=624.113ms incremental=621.758ms
+n=64 run=4 replay=619.260ms incremental=627.378ms
+n=64 run=5 replay=633.490ms incremental=625.597ms
+n=256 run=1 replay=841.738ms incremental=836.243ms
+n=256 run=2 replay=829.820ms incremental=837.778ms
+n=256 run=3 replay=820.632ms incremental=833.571ms
+n=256 run=4 replay=838.799ms incremental=822.279ms
+n=256 run=5 replay=825.771ms incremental=826.400ms
+n=1024 run=1 replay=1833.327ms incremental=1885.015ms
+n=1024 run=2 replay=1815.972ms incremental=1880.568ms
+n=1024 run=3 replay=1814.725ms incremental=1900.511ms
+n=1024 run=4 replay=1823.811ms incremental=1909.608ms
+n=1024 run=5 replay=1852.172ms incremental=1925.798ms
+wrote results/performance.json

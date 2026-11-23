@@ -151,6 +151,11 @@ pub struct IncrementalEngine {
     pub grant_tree: SparseMerkleTree,
     pub revoke_tree: SparseMerkleTree,
     pub depth: usize,
+    /// Actual `grant_leaf` Poseidon evaluations performed by this engine.
+    /// Displaced leaves are copied to new canonical slots, not re-hashed.
+    pub grant_leaf_commitments: u64,
+    /// Actual `revoke_leaf` Poseidon evaluations performed by this engine.
+    pub revoke_leaf_commitments: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,6 +172,8 @@ impl IncrementalEngine {
             grant_tree: SparseMerkleTree::new(depth),
             revoke_tree: SparseMerkleTree::new(depth),
             depth,
+            grant_leaf_commitments: 0,
+            revoke_leaf_commitments: 0,
         }
     }
 
@@ -184,8 +191,9 @@ impl IncrementalEngine {
                 self.state
                     .grants
                     .insert(grant.grant_id, (grant.clone(), true));
+                self.grant_leaf_commitments += 1;
                 self.grant_tree
-                    .upsert(grant.grant_id, Some(grant_leaf(grant, true)));
+                    .try_upsert(grant.grant_id, Some(grant_leaf(grant, true)))?;
                 changed += 1;
             }
             Event::Revoke(revoke) => {
@@ -207,7 +215,9 @@ impl IncrementalEngine {
                 for id in affected {
                     if let Some((grant, valid)) = self.state.grants.get_mut(&id) {
                         *valid = false;
-                        self.grant_tree.upsert(id, Some(grant_leaf(grant, false)));
+                        self.grant_leaf_commitments += 1;
+                        self.grant_tree
+                            .try_upsert(id, Some(grant_leaf(grant, false)))?;
                     }
                     let record = RevokeEvent {
                         grant_id: id,
@@ -218,7 +228,9 @@ impl IncrementalEngine {
                         .revokes
                         .entry(id)
                         .or_insert_with(|| record.clone());
-                    self.revoke_tree.upsert(id, Some(revoke_leaf(&record)));
+                    self.revoke_leaf_commitments += 1;
+                    self.revoke_tree
+                        .try_upsert(id, Some(revoke_leaf(&record)))?;
                     changed += 1;
                 }
             }
@@ -232,12 +244,15 @@ impl IncrementalEngine {
         })
     }
 
+    /// Total Poseidon calls on the GR: leaf commitments + node hashes
+    /// (initialisation + incremental path updates). Same boundary as path A.
     pub fn grant_hashes(&self) -> u64 {
-        self.grant_tree.leaf_hashes + self.grant_tree.node_hashes
+        self.grant_leaf_commitments + self.grant_tree.node_hashes()
     }
 
+    /// Total Poseidon calls on the RR, same boundary as `grant_hashes`.
     pub fn revoke_hashes(&self) -> u64 {
-        self.revoke_tree.leaf_hashes + self.revoke_tree.node_hashes
+        self.revoke_leaf_commitments + self.revoke_tree.node_hashes()
     }
 }
 

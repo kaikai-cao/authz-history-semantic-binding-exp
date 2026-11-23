@@ -89,6 +89,8 @@ pub enum StatementError {
     NextEpochMismatch,
     /// An event in the declared batch violates the state machine rules.
     InvalidHistory(String),
+    /// A canonical Merkle tree could not accommodate the rebuilt state.
+    TreeCapacityExhausted,
 }
 
 impl StatementError {
@@ -102,7 +104,14 @@ impl StatementError {
             Self::PreviousEpochMismatch => "PREVIOUS_EPOCH_MISMATCH".to_string(),
             Self::NextEpochMismatch => "NEXT_EPOCH_MISMATCH".to_string(),
             Self::InvalidHistory(c) => format!("INVALID_HISTORY:{c}"),
+            Self::TreeCapacityExhausted => "TREE_CAPACITY_EXHAUSTED".to_string(),
         }
+    }
+}
+
+impl From<crate::grant_tree::TreeError> for StatementError {
+    fn from(_: crate::grant_tree::TreeError) -> Self {
+        Self::TreeCapacityExhausted
     }
 }
 
@@ -134,8 +143,8 @@ pub fn verify_transition_statement(
         return Err(StatementError::PreviousEpochMismatch);
     }
 
-    let (pre_gr, _, _) = grant_root_from_records(&certified_previous.grants, depth);
-    let (pre_rr, _, _) = revoke_root_from_records(&certified_previous.revokes, depth);
+    let (pre_gr, _, _) = grant_root_from_records(&certified_previous.grants, depth)?;
+    let (pre_rr, _, _) = revoke_root_from_records(&certified_previous.revokes, depth)?;
     if pre_gr != stmt.previous_grant_root || pre_rr != stmt.previous_revoke_root {
         return Err(StatementError::PreviousRootMismatch);
     }
@@ -146,8 +155,8 @@ pub fn verify_transition_statement(
             .map_err(|e| StatementError::InvalidHistory(e.code().to_string()))?;
     }
 
-    let (next_gr, _, _) = grant_root_from_records(&next.grants, depth);
-    let (next_rr, _, _) = revoke_root_from_records(&next.revokes, depth);
+    let (next_gr, _, _) = grant_root_from_records(&next.grants, depth)?;
+    let (next_rr, _, _) = revoke_root_from_records(&next.revokes, depth)?;
     if next_gr != stmt.next_grant_root || next_rr != stmt.next_revoke_root {
         return Err(StatementError::NextRootMismatch);
     }

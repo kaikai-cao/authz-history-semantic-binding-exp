@@ -107,8 +107,14 @@ impl History {
         }
 
         let grant_records: BTreeMap<Hash32, (GrantEvent, bool)> = state.grants.clone();
-        let (grant_root, grant_hashes, _) = grant_root_from_records(&grant_records, depth);
-        let (revoke_root, revoke_hashes, _) = revoke_root_from_records(&state.revokes, depth);
+        let (grant_root, grant_leaf_writes, grant_node_hashes) =
+            grant_root_from_records(&grant_records, depth)?;
+        let (revoke_root, revoke_leaf_writes, revoke_node_hashes) =
+            revoke_root_from_records(&state.revokes, depth)?;
+        // Same Poseidon-call boundary as the incremental engine: leaf
+        // commitments + all node hashes (initialisation + path updates).
+        let grant_hashes = grant_leaf_writes + grant_node_hashes;
+        let revoke_hashes = revoke_leaf_writes + revoke_node_hashes;
 
         Ok(ReplayOutcome {
             state,
@@ -122,6 +128,11 @@ impl History {
 }
 
 /// Build a deterministic valid history of `n` events without randomness.
+///
+/// This is a *linear delegation chain*: only `grant-0` is a root grant; every
+/// later grant references the immediately preceding grant as parent. All grants
+/// share the same issuer/subject ("root-issuer") so any grant in the chain may be
+/// revoked by that issuer — but they are NOT all root grants.
 pub fn build_linear_history(n: usize) -> History {
     let mut h = History::new();
     let mut epoch = 1u64;

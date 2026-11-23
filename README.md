@@ -19,6 +19,15 @@
 交叉验证：A/B 的 GR/RR 根逐字节相等；A/B/C 的 `state.summary()`（SHA-256 over 排序后的
 valid/revoked 集合）相等。C 的规则判定本地重写，因此一致不是同函数复用的重言式。
 
+**EXP-D3-01-R1（正确性修复，D3-01 随后冻结）**：
+- Merkle 槽位改为规范性映射：id 集合规范排序 + 全键域分离哈希初始槽位 + 规范序线性探测，
+  相同记录集合与插入顺序无关；初始槽位冲突按 id 序消解；满树返回 `TREE_CAPACITY_EXHAUSTED`
+  类型化错误。B 仍为真增量（只更新受影响路径，不整体重建）。
+- D3-11 现经真实验证器 `verify_transition_statement` 拒绝伪造 grant，错误码 `NEXT_ROOT_MISMATCH`。
+- benchmark 首次测量为循环内第一轮且不再被额外重跑覆盖；5 条原始样本全部保留在 `raw_runs`。
+- 修复只改变 Merkle 根；事件编码、批次摘要、状态摘要不变。修复前向量/性能数据分别保留在
+  `tests/vectors/fixed_vectors_before_r1.json`、`results/performance_before_r1.json`。
+
 ## 状态机规则
 
 - Grant：`grant_id` 全局唯一；根授权无 parent；子授权 parent 必须已存在且有效；

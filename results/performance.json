@@ -1,23 +1,56 @@
 {
-  "schema": "D3-01-benchmark-v1",
+  "schema": "D3-01-benchmark-v2",
   "note": "Reference Rust implementation only; not Halo2 or ZK proof performance.",
+  "first_measurement_definition": "The first in-process iteration of the five-run loop; it is informational only and is NOT a strictly cold process start.",
+  "hash_count_boundary": "Poseidon invocations only: grant_leaf/revoke_leaf leaf commitments plus node_hash calls (tree initialisation + incremental path updates). NOT circuit constraints and not generic cryptographic operations.",
   "tree_depth": 12,
   "runs_per_size": 5,
   "sizes": [
     {
       "n": 16,
-      "replay_first_ms": 571.0626,
-      "replay_stable_mean_ms": 595.291375,
-      "replay_stable_min_ms": 562.4586,
-      "incremental_first_ms": 588.7419,
-      "incremental_stable_mean_ms": 590.0247750000001,
-      "incremental_stable_min_ms": 561.6913999999999,
+      "event_count": 20,
+      "revoked_events": 4,
+      "replay_first_ms": 570.2637000000001,
+      "replay_stable_mean_ms": 576.27935,
+      "replay_stable_min_ms": 574.0989,
+      "incremental_first_ms": 587.0667000000001,
+      "incremental_stable_mean_ms": 576.28525,
+      "incremental_stable_min_ms": 568.1600999999999,
+      "raw_runs": [
+        {
+          "run": 1,
+          "replay_ms": 570.2637000000001,
+          "incremental_ms": 587.0667000000001
+        },
+        {
+          "run": 2,
+          "replay_ms": 574.0989,
+          "incremental_ms": 581.5428999999999
+        },
+        {
+          "run": 3,
+          "replay_ms": 577.0471,
+          "incremental_ms": 581.6046
+        },
+        {
+          "run": 4,
+          "replay_ms": 577.5301000000001,
+          "incremental_ms": 568.1600999999999
+        },
+        {
+          "run": 5,
+          "replay_ms": 576.4413000000001,
+          "incremental_ms": 573.8334000000001
+        }
+      ],
       "grant_tree_hashes_replay": 4303,
       "grant_tree_hashes_incremental": 4355,
       "revoke_tree_hashes_replay": 4147,
       "revoke_tree_hashes_incremental": 4147,
-      "event_count": 20,
-      "revoked_events": 4,
+      "grant_node_init_hashes_incremental": 4095,
+      "grant_node_path_hashes_incremental": 240,
+      "revoke_node_init_hashes_incremental": 4095,
+      "revoke_node_path_hashes_incremental": 48,
       "changed_leaves": 20,
       "statement_size_bytes": 242,
       "public_input_count": 9,
@@ -27,18 +60,49 @@
     },
     {
       "n": 64,
-      "replay_first_ms": 611.2574,
-      "replay_stable_mean_ms": 615.87235,
-      "replay_stable_min_ms": 606.3530999999999,
-      "incremental_first_ms": 622.0055,
-      "incremental_stable_mean_ms": 612.6330500000001,
-      "incremental_stable_min_ms": 607.8248000000001,
+      "event_count": 68,
+      "revoked_events": 4,
+      "replay_first_ms": 631.941,
+      "replay_stable_mean_ms": 625.2196,
+      "replay_stable_min_ms": 619.2601,
+      "incremental_first_ms": 629.977,
+      "incremental_stable_mean_ms": 628.1024,
+      "incremental_stable_min_ms": 621.7578,
+      "raw_runs": [
+        {
+          "run": 1,
+          "replay_ms": 631.941,
+          "incremental_ms": 629.977
+        },
+        {
+          "run": 2,
+          "replay_ms": 624.0154,
+          "incremental_ms": 637.677
+        },
+        {
+          "run": 3,
+          "replay_ms": 624.1132,
+          "incremental_ms": 621.7578
+        },
+        {
+          "run": 4,
+          "replay_ms": 619.2601,
+          "incremental_ms": 627.3782
+        },
+        {
+          "run": 5,
+          "replay_ms": 633.4897000000001,
+          "incremental_ms": 625.5966
+        }
+      ],
       "grant_tree_hashes_replay": 4927,
       "grant_tree_hashes_incremental": 4979,
       "revoke_tree_hashes_replay": 4147,
       "revoke_tree_hashes_incremental": 4147,
-      "event_count": 68,
-      "revoked_events": 4,
+      "grant_node_init_hashes_incremental": 4095,
+      "grant_node_path_hashes_incremental": 816,
+      "revoke_node_init_hashes_incremental": 4095,
+      "revoke_node_path_hashes_incremental": 48,
       "changed_leaves": 68,
       "statement_size_bytes": 242,
       "public_input_count": 9,
@@ -48,18 +112,49 @@
     },
     {
       "n": 256,
-      "replay_first_ms": 804.8028,
-      "replay_stable_mean_ms": 797.378275,
-      "replay_stable_min_ms": 790.3632,
-      "incremental_first_ms": 812.2776,
-      "incremental_stable_mean_ms": 804.858425,
-      "incremental_stable_min_ms": 798.6645,
-      "grant_tree_hashes_replay": 7423,
-      "grant_tree_hashes_incremental": 7475,
-      "revoke_tree_hashes_replay": 4147,
-      "revoke_tree_hashes_incremental": 4147,
       "event_count": 260,
       "revoked_events": 4,
+      "replay_first_ms": 841.7375000000001,
+      "replay_stable_mean_ms": 828.755675,
+      "replay_stable_min_ms": 820.6320999999999,
+      "incremental_first_ms": 836.2429999999999,
+      "incremental_stable_mean_ms": 830.00685,
+      "incremental_stable_min_ms": 822.2785,
+      "raw_runs": [
+        {
+          "run": 1,
+          "replay_ms": 841.7375000000001,
+          "incremental_ms": 836.2429999999999
+        },
+        {
+          "run": 2,
+          "replay_ms": 829.8199000000001,
+          "incremental_ms": 837.7783
+        },
+        {
+          "run": 3,
+          "replay_ms": 820.6320999999999,
+          "incremental_ms": 833.5707
+        },
+        {
+          "run": 4,
+          "replay_ms": 838.7994,
+          "incremental_ms": 822.2785
+        },
+        {
+          "run": 5,
+          "replay_ms": 825.7713,
+          "incremental_ms": 826.3999
+        }
+      ],
+      "grant_tree_hashes_replay": 7423,
+      "grant_tree_hashes_incremental": 7511,
+      "revoke_tree_hashes_replay": 4147,
+      "revoke_tree_hashes_incremental": 4147,
+      "grant_node_init_hashes_incremental": 4095,
+      "grant_node_path_hashes_incremental": 3156,
+      "revoke_node_init_hashes_incremental": 4095,
+      "revoke_node_path_hashes_incremental": 48,
       "changed_leaves": 260,
       "statement_size_bytes": 242,
       "public_input_count": 9,
@@ -69,18 +164,49 @@
     },
     {
       "n": 1024,
-      "replay_first_ms": 1536.0337,
-      "replay_stable_mean_ms": 1542.19085,
-      "replay_stable_min_ms": 1502.1336000000001,
-      "incremental_first_ms": 1552.4188,
-      "incremental_stable_mean_ms": 1546.92415,
-      "incremental_stable_min_ms": 1538.8869,
-      "grant_tree_hashes_replay": 17407,
-      "grant_tree_hashes_incremental": 17459,
-      "revoke_tree_hashes_replay": 4147,
-      "revoke_tree_hashes_incremental": 4147,
       "event_count": 1028,
       "revoked_events": 4,
+      "replay_first_ms": 1833.3268,
+      "replay_stable_mean_ms": 1826.6699999999998,
+      "replay_stable_min_ms": 1814.7250000000001,
+      "incremental_first_ms": 1885.0153,
+      "incremental_stable_mean_ms": 1904.121275,
+      "incremental_stable_min_ms": 1880.568,
+      "raw_runs": [
+        {
+          "run": 1,
+          "replay_ms": 1833.3268,
+          "incremental_ms": 1885.0153
+        },
+        {
+          "run": 2,
+          "replay_ms": 1815.9719,
+          "incremental_ms": 1880.568
+        },
+        {
+          "run": 3,
+          "replay_ms": 1814.7250000000001,
+          "incremental_ms": 1900.5114999999998
+        },
+        {
+          "run": 4,
+          "replay_ms": 1823.8105999999998,
+          "incremental_ms": 1909.6079000000002
+        },
+        {
+          "run": 5,
+          "replay_ms": 1852.1725,
+          "incremental_ms": 1925.7976999999998
+        }
+      ],
+      "grant_tree_hashes_replay": 17407,
+      "grant_tree_hashes_incremental": 18227,
+      "revoke_tree_hashes_replay": 4147,
+      "revoke_tree_hashes_incremental": 4147,
+      "grant_node_init_hashes_incremental": 4095,
+      "grant_node_path_hashes_incremental": 13104,
+      "revoke_node_init_hashes_incremental": 4095,
+      "revoke_node_path_hashes_incremental": 48,
       "changed_leaves": 1028,
       "statement_size_bytes": 242,
       "public_input_count": 9,

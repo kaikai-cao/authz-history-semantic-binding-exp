@@ -1,18 +1,56 @@
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\authz_history_semantic_binding_exp-05xkselfa9t60\s-hofe7zqxvd-1vxeerc.lock`: 拒绝访问。 (os error 5)
+
    Compiling authz-history-semantic-binding-exp v0.1.0 (D:\Research\authz-history-semantic-binding-exp)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.17s
+warning: `authz-history-semantic-binding-exp` (lib) generated 1 warning
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\benchmark-3jwskcrda0c28\s-hofe810xae-1unkkfa.lock`: 拒绝访问。 (os error 5)
+
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\gen_vectors-14i3z24aot5lf\s-hofe810tv8-13cqwn9.lock`: 拒绝访问。 (os error 5)
+
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\test_fixed_vectors-2kvdcaafipbw9\s-hofe80zl39-00vbeq7.lock`: 拒绝访问。 (os error 5)
+
+warning: `authz-history-semantic-binding-exp` (bin "benchmark") generated 1 warning
+warning: `authz-history-semantic-binding-exp` (bin "gen_vectors") generated 1 warning
+warning: `authz-history-semantic-binding-exp` (test "test_fixed_vectors") generated 1 warning
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\gen_vectors-2mtr2ldrgmqjt\s-hofe810c59-0n2i3q5.lock`: 拒绝访问。 (os error 5)
+
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\benchmark-3g3nz9i4x8x5n\s-hofe80znfj-0ckdmr5.lock`: 拒绝访问。 (os error 5)
+
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\test_history_order-3qlbjtbc66lvd\s-hofe80zt7w-16gujt3.lock`: 拒绝访问。 (os error 5)
+
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\test_grant_transition-32p0zhssadoeb\s-hofe810ryz-1xrnzdf.lock`: 拒绝访问。 (os error 5)
+
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\test_revoke_transition-2d0r6jbz7wkuz\s-hofe81070j-0csxlg6.lock`: 拒绝访问。 (os error 5)
+
+warning: `authz-history-semantic-binding-exp` (bin "gen_vectors" test) generated 1 warning
+warning: `authz-history-semantic-binding-exp` (bin "benchmark" test) generated 1 warning
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\test_root_consistency-01k0vexsak1v6\s-hofe80zy40-0ndwqes.lock`: 拒绝访问。 (os error 5)
+
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\test_reference_model-0nk1pbojhjl7k\s-hofe810h5b-040yed8.lock`: 拒绝访问。 (os error 5)
+
+warning: `authz-history-semantic-binding-exp` (test "test_history_order") generated 1 warning
+warning: `authz-history-semantic-binding-exp` (test "test_revoke_transition") generated 1 warning
+warning: `authz-history-semantic-binding-exp` (test "test_grant_transition") generated 1 warning
+warning: error deleting lock file for incremental compilation session directory `\\?\D:\Research\authz-history-semantic-binding-exp\target\debug\incremental\authz_history_semantic_binding_exp-0rpaqm1dzl40w\s-hofe7zqxsr-08i0s1h.lock`: 拒绝访问。 (os error 5)
+
+warning: `authz-history-semantic-binding-exp` (test "test_reference_model") generated 1 warning
+warning: `authz-history-semantic-binding-exp` (test "test_root_consistency") generated 1 warning
+warning: `authz-history-semantic-binding-exp` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.96s
      Running unittests src\lib.rs (target\debug\deps\authz_history_semantic_binding_exp-f3020dd1d94bf8e9.exe)
 
-running 8 tests
+running 10 tests
 test encoding::tests::encoding_is_deterministic_and_length_prefixed ... ok
-test policy::tests::revocation_policy_codes_roundtrip ... ok
-test event::tests::event_encoding_is_deterministic_and_kind_separated ... ok
-test history::tests::batch_digest_changes_with_order ... ok
 test encoding::tests::field_mapping_is_deterministic_and_domain_separated ... ok
+test event::tests::event_encoding_is_deterministic_and_kind_separated ... ok
+test policy::tests::revocation_policy_codes_roundtrip ... ok
+test history::tests::batch_digest_changes_with_order ... ok
 test policy::tests::scope_and_resource_subsets ... ok
 test reference_model::tests::reference_accepts_valid_history ... ok
+test grant_tree::tests::capacity_exhaustion_is_a_typed_error ... ok
 test state::tests::incremental_and_snapshot_summaries_match ... ok
+test grant_tree::tests::canonical_assignment_is_injective_and_order_free ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
 
      Running unittests src\bin\benchmark.rs (target\debug\deps\benchmark-25f77383c39d5fb7.exe)
 
@@ -31,20 +69,20 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 1 test
 test fixed_vectors_reproduce ... ok
 
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.40s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.55s
 
      Running tests\test_grant_transition.rs (target\debug\deps\test_grant_transition-2c60bd3a0e60445f.exe)
 
 running 7 tests
-test d3_04_child_issuer_mismatch_reject ... ok
 test d3_05_duplicate_grant_reject ... ok
+test d3_01_root_grant_accept ... ok
 test d3_03_child_scope_escalation_reject ... ok
 test resource_escalation_reject ... ok
-test d3_01_root_grant_accept ... ok
+test d3_04_child_issuer_mismatch_reject ... ok
 test d3_02_child_grant_accept ... ok
 test d3_08_derive_from_revoked_parent_reject ... ok
 
-test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.31s
 
      Running tests\test_history_order.rs (target\debug\deps\test_history_order-80b5344d92427580.exe)
 
@@ -68,7 +106,7 @@ test statement_verification_accepts_honest_transition ... ok
 test d3_12_skip_event_is_caught ... ok
 test reference_summary_matches_snapshot_for_varied_histories ... ok
 
-test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.61s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.80s
 
      Running tests\test_revoke_transition.rs (target\debug\deps\test_revoke_transition-5952420da2a98a15.exe)
 
@@ -80,18 +118,24 @@ test policies_produce_different_roots ... ok
 test direct_only_keeps_descendant_valid ... ok
 test cascade_revokes_descendants ... ok
 
-test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.59s
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.64s
 
      Running tests\test_root_consistency.rs (target\debug\deps\test_root_consistency-d1c44ed4505659d0.exe)
 
-running 5 tests
-test d3_11_state_tree_inconsistent_with_history ... ok
+running 10 tests
+test r1_t02_initial_slot_collision_is_canonical_and_lossless ... ok
+test r1_t03_update_delete_reinsert_matches_canonical_rebuild ... ok
 test event_kind_change_changes_gr ... ok
 test roots_are_reproducible ... ok
-test three_paths_agree_cascade ... ok
 test three_paths_agree_direct_only ... ok
+test three_paths_agree_cascade ... ok
+test r1_t04_forged_grant_is_rejected_by_real_verifier ... ok
+test d3_11_state_tree_inconsistent_with_history_is_detected_by_verifier ... ok
+test r1_t01_insertion_order_does_not_change_roots ... ok
+test r1_t05_four_sizes_three_paths_agree has been running for over 60 seconds
+test r1_t05_four_sizes_three_paths_agree ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.32s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 162.69s
 
    Doc-tests authz_history_semantic_binding_exp
 

@@ -45,6 +45,8 @@ pub enum RuleError {
     EpochRegression,
     AlreadyRevoked,
     RevokerNotAllowed,
+    /// A canonical Merkle tree could not accommodate the state (typed, never a panic).
+    TreeCapacityExhausted,
 }
 
 impl RuleError {
@@ -61,7 +63,14 @@ impl RuleError {
             Self::EpochRegression => "EPOCH_REGRESSION",
             Self::AlreadyRevoked => "ALREADY_REVOKED",
             Self::RevokerNotAllowed => "REVOKER_NOT_ALLOWED",
+            Self::TreeCapacityExhausted => "TREE_CAPACITY_EXHAUSTED",
         }
+    }
+}
+
+impl From<crate::grant_tree::TreeError> for RuleError {
+    fn from(_: crate::grant_tree::TreeError) -> Self {
+        Self::TreeCapacityExhausted
     }
 }
 
