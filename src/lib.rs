@@ -5,9 +5,12 @@
 //! adversarial tests, a future proof interface, and reference-implementation
 //! cost measurements.
 //!
-//! This crate does NOT implement Halo2 circuits or zero-knowledge proofs.
-//! A SHA-256 / Poseidon root being consistent is NOT a cryptographic semantic
-//! proof, and the event batch digest is NOT a semantic proof of event validity.
+//! EXP-D3-03-A adds a *minimal* Halo2 skeleton circuit (`transition`) that
+//! binds state commitments / policy / version / batch to public instances and
+//! checks canonical field encoding in-circuit.  It deliberately does NOT prove
+//! grant/revoke semantics, history completeness or freshness; see
+//! `docs/d3_03_a_circuit_notes.md`.  A matching SHA-256 / Poseidon root is NOT
+//! by itself a cryptographic semantic proof.
 
 pub mod encoding;
 pub mod event;
@@ -17,6 +20,7 @@ pub mod policy;
 pub mod reference_model;
 pub mod revoke_tree;
 pub mod state;
+pub mod transition;
 
 use crate::encoding::{enc_bytes, enc_hash32, enc_u32, enc_u64, hash_encode, sha256_hash, Hash32};
 use crate::policy::RevocationPolicy;

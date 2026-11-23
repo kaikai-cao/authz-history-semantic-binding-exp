@@ -47,7 +47,10 @@ pub struct TransitionPublicInputs {
 }
 ```
 
-**字段总数 12**（任务书建议 11 + `transition_version` 1）。相对 R1 的 11 字段：
+**字段总数 11**（3 Hash32 + 4 Field + 2 u64 + 2 u32；其中 8 个进电路 instance，3 个 Hash32 仅网关核对）。
+> **D3-03-A 勘误**：初稿误写为"12 字段 / 4 个 Hash32"，实际结构体只有 3 个 Hash32
+> （`previous_anchor_digest`/`layout_digest`/`vk_hash`），总数为 11。字段语义与顺序不变。
+相对 R1 的 11 字段：
 - `next_grant_root`/`next_revoke_root` → 合并为 `next_state_commitment`（因 R1-01 把 C_prev 语义
   唯一化为 Poseidon 承诺，后状态也应对称提供 C_next；GR_next/RR_next 降为私有 witness，
   由 C_next 开承诺锁定）。这是**与 R1 的差异，需明确记录**：
@@ -74,9 +77,9 @@ pub struct TransitionPublicInputs {
 | `layout_digest` | Hash32 | ❌ | 布局服务 | Layout quorum 签名 | 不用（网关核对用） | 重算 assignment_digest 比对 + 验签 | ✅ 含 nonce/epoch |
 | `vk_hash` | Hash32 | ❌ | 验证端从 vk_bytes 算 | VK 注册表 | 不用（元数据） | `registry[vk_hash]` active + policy_id 匹配 | ✅ 旧 vk 标 inactive |
 
-**关键设计点**：4 个字段不进电路 instance（`previous_anchor_digest`、`layout_digest`、`vk_hash`
+**关键设计点**：3 个字段不进电路 instance（`previous_anchor_digest`、`layout_digest`、`vk_hash`
 是 Hash32；它们是网关电路外核对的锚）。把它们列入结构是**接口完整性**要求（验证者必须拿到），
-不是让它们进 Halo2 列。电路 instance 实际只有 8 个字段（6 Field + 2 u64 映射 + 2 u32 映射）。
+不是让它们进 Halo2 列。电路 instance 实际只有 8 个字段（4 Field + 2 u64 映射 + 2 u32 映射）。
 
 ### 1.2 u64/u32 → Field 的映射（冻结）
 
@@ -258,7 +261,7 @@ C_next == Poseidon(D3-STATE-P-v2, gr_next_f, rr_next_f, next_epoch, policy_id)
 
 ---
 
-## 5. 字段删除/新增实验（为什么是这 12 个）
+## 5. 字段删除/新增实验（为什么是这 11 个）
 
 | 字段 | 删除后果 | 结论 |
 | --- | --- | --- |
@@ -284,5 +287,5 @@ C_next == Poseidon(D3-STATE-P-v2, gr_next_f, rr_next_f, next_epoch, policy_id)
 - 不证明历史完整性（跳事件/删撤销/旧批次/不完整子集）——见 `d3_02_security_analysis.md` §1。
 - 不证明执行时新鲜性——fencing 是外部假设（security §2.4）。
 - 不证明布局规范性（T09/T10）、不防跨 vk 重放（R09 靠注册表）。
-- 4 个 Hash32 字段不进电路 instance——它们是网关核对锚，不是 Halo2 公开输入列。
+- 3 个 Hash32 字段不进电路 instance——它们是网关核对锚，不是 Halo2 公开输入列。
 - `next_state_commitment` 替换 R1 的独立双根公开字段是本轮接口变更，D3-04 若需独立双根须走 witness 展开路径。

@@ -1,0 +1,10 @@
+   Compiling authz-history-semantic-binding-exp v0.1.0 (D:\Research\authz-history-semantic-binding-exp)
+    Finished `release` profile [optimized] target(s) in 8.87s
+     Running tests\d3_03_a_proof.rs (target\release\deps\d3_03_a_proof-bd9604c9f86a1c3c.exe)
+
+running 2 tests
+A17 K=12 proof_bytes=3904 keygen_ms=1490 prove_ms=2737 verify_ms=76
+test a17_real_proof_roundtrip_accepted ... ok
+test a18_wrong_public_instance_verifier_rejects ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.00s
