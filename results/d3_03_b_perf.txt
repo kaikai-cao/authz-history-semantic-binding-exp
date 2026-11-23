@@ -1,0 +1,26 @@
+EXP-D3-03-B performance record
+baseline: cae2ec722c1beac7b7b5e366dffbe6338466f6ba (D3-03-A, frozen)
+branch:   exp-d3-03-b
+toolchain: cargo test --release, Halo2 0.4.0, Pallas base field, Poseidon P128Pow5T3
+timing discipline: keygen_vk + keygen_pk are inside keygen_ms; verify_ms excludes keygen and measures verify_proof only (same discipline as D3-03-A).
+
+[Fresh same-run measurement, 2026-11-23]
+A17 (frozen A circuit, re-run for comparability)
+  K=12 proof_bytes=3904 keygen_ms=800  prove_ms=1424 verify_ms=42
+B14 (B circuit: parent opening + single grant creation)
+  K=12 proof_bytes=5696 keygen_ms=1368 prove_ms=1837 verify_ms=42
+
+[Frozen D3-03-A record carried forward, do not overwrite]
+  K=12 proof_bytes=3904 keygen_ms=1490 prove_ms=2737 verify_ms=76
+  Source: D3-03-A acceptance package. Cross-run absolute timings vary by machine load;
+  use the fresh same-run A17/B14 pair for incremental comparison.
+
+[What is and is not measured]
+- K=12 is an engineering decision inherited from D3-03-A (initial design K=13 was reduced
+  because keygen exceeded 20 minutes); it is not an original design parameter.
+- proof_bytes is exact serialized proof length. keygen/prove/verify are wall-clock ms.
+- No per-gate constraint count and no exact used-row count were instrumented. Selector-family
+  count increased from 9 (A) to 20 (B); this is a structural indicator only, NOT a constraint count.
+- Source line counts are not circuit size: A core transition files = 990 lines
+  (constants.rs 187 + types.rs 253 + circuit.rs 550); B core transition files = 1475 lines
+  (b_constants.rs 72 + b_types.rs 306 + b_circuit.rs 1097).
