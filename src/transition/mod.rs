@@ -19,6 +19,7 @@ pub mod e_r1_constants;
 pub mod e_r1_types;
 pub mod e_r1_types_host;
 pub mod e_r1_uniqueness;
+pub mod e_r2_types;
 pub mod e_types;
 pub mod e_types_host;
 pub mod types;
@@ -53,6 +54,10 @@ pub use e_r1_types_host::blank_r1;
 pub use e_r1_uniqueness::{
     active_gr_ids, active_rr_ids, empty_scan, gr_root_of, neq_inv, rr_root_of, scan_from_slots,
     GrLeafR1, RrLeafR1, TreeScanR1,
+};
+pub use e_r2_types::{
+    build_scenario_r2, check_initial_rr_unique, initial_rr_pairwise_checks, rr_root_from_preimages,
+    InitialRrState, R2Error, TransitionWitnessR2,
 };
 pub use e_types::{
     build_scenario_e, final_roots_e, grant_event_commitment_e, revoke_event_commitment_e,
