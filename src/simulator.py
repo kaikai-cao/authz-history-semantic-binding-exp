@@ -118,6 +118,7 @@ class Simulator:
         self.violations: List[Dict[str, str]] = []
         self.adversarial_observations: List[str] = []
         self.liveness: Dict[str, Dict[str, Any]] = {}
+        self.author_liveness_r0: Dict[str, bool] = {}
         self.notes: List[str] = []
         self.initial_state: Dict[str, Any] = {}
         self.witnesses: Dict[str, Witness] = {
@@ -219,7 +220,149 @@ class Simulator:
         self.adversarial_observations.append(detail)
 
     def set_liveness(self, code: str, passed: bool, note: str) -> None:
+        """R0 compatibility: keep the author's hand-written annotation only.
+
+        R1 does not use this as the reported Liveness result; it is preserved
+        as ``author_liveness_r0`` for the before/after comparison.
+        """
+        self.author_liveness_r0[code] = bool(passed)
         self.liveness[code] = {"passed": bool(passed), "note": note}
+
+    # ---------- R1: liveness derived from recorded evidence ----------
+
+    def _liveness_entry(self, passed: Optional[bool], note: str, basis: str) -> Dict[str, Any]:
+        if passed is None:
+            status = "not_applicable"
+        elif passed:
+            status = "achieved"
+        else:
+            status = "not_achieved"
+        return {"status": status, "passed": passed, "note": note, "basis": basis}
+
+    def derive_liveness(self) -> Dict[str, Dict[str, Any]]:
+        """Compute L1-L4 from events and final state, never from author input.
+
+        Precondition absent -> ``not_applicable`` (passed=None), never an
+        automatic pass.  ``basis`` records the exact evidence used so the
+        test suite can re-derive and cross-check the reported field.
+        """
+        actions = [e["action"] for e in self.events]
+        phases = [e.get("phase", "") for e in self.events]
+        accepted_events = [e for e in self.events if e["action"] in ("qc_accepted", "fc_accepted")]
+        byzantine = {wid for wid, w in self.witnesses.items() if not w.honest}
+        recovery_attempted = any(
+            a in ("timeout_round_advance", "trusted_recovery", "unsafe_timeout_unlock")
+            or "heal" in p
+            or "recovery" in p
+            for a, p in zip(actions, phases)
+        )
+        trusted_recovery_used = "trusted_recovery" in actions
+        round_change_used = "timeout_round_advance" in actions
+        clock_dependency = self.model == "C"
+
+        signers_by_key: Dict[Tuple[str, int], set] = {}
+        for w in self.witnesses.values():
+            for v in w.signed_votes():
+                if v.kind not in ("candidate", "prevote"):
+                    continue
+                signers_by_key.setdefault((v.cp.checkpoint_digest, v.round), set()).add(v.witness)
+        accepted_digests = {q["digest"] for q in self.gateway.qc} | {f["digest"] for f in self.gateway.fc}
+        incomplete = [
+            (d, r, sorted(ss))
+            for (d, r), ss in signers_by_key.items()
+            if 0 < len(ss) < QC_THRESHOLD and d not in accepted_digests
+        ]
+
+        gateway_committed = set(self.gateway.committed.values())
+        blocked: List[str] = []
+        for wid, w in self.witnesses.items():
+            if not w.honest:
+                continue
+            for rec in w.durable.get("locked", {}).values():
+                if rec["digest"] not in gateway_committed:
+                    blocked.append(f"{wid}:locked@{rec['round']}:{rec['digest'][:8]}")
+            for rec in w.durable.get("pending", {}).values():
+                if rec["digest"] not in gateway_committed:
+                    blocked.append(f"{wid}:pending@{rec['round']}:{rec['digest'][:8]}")
+
+        quorum_records = self.gateway.qc + self.gateway.fc
+        honest_quorum = any(
+            len([s for s in rec["signers"] if s not in byzantine]) >= QC_THRESHOLD
+            for rec in quorum_records
+        )
+
+        out: Dict[str, Dict[str, Any]] = {}
+        if not accepted_events and not recovery_attempted:
+            out["L1"] = self._liveness_entry(
+                None,
+                "no advance or recovery attempt appears in this schedule",
+                "events: qc_accepted/fc_accepted, timeout_round_advance, trusted_recovery, heal/recovery phase",
+            )
+        else:
+            out["L1"] = self._liveness_entry(
+                bool(accepted_events),
+                (
+                    f"{len(accepted_events)} accepted QC/FC record(s) observed"
+                    if accepted_events
+                    else "recovery attempted but no QC/FC was accepted"
+                ),
+                "events: qc_accepted / fc_accepted",
+            )
+
+        if not incomplete:
+            out["L2"] = self._liveness_entry(
+                None,
+                "no candidate signed by 1..2 distinct witnesses exists in this schedule",
+                "signed candidate/prevote signer sets versus accepted QC/FC digests",
+            )
+        else:
+            out["L2"] = self._liveness_entry(
+                bool(accepted_events) and not blocked,
+                (
+                    "progress observed despite an incomplete candidate"
+                    if accepted_events and not blocked
+                    else "no accepted progress" + (f"; unresolved lock(s): {blocked}" if blocked else "")
+                ),
+                "events: qc_accepted/fc_accepted; final durable locked/pending state",
+            )
+
+        if not byzantine:
+            out["L3"] = self._liveness_entry(
+                None,
+                "no witness marked Byzantine/offline in this schedule",
+                "events: byzantine_marked; accepted QC/FC signer sets",
+            )
+        else:
+            out["L3"] = self._liveness_entry(
+                honest_quorum,
+                (
+                    "accepted QC/FC contains at least three non-Byzantine signers"
+                    if honest_quorum
+                    else "no accepted QC/FC formed by three honest signers"
+                ),
+                "events: byzantine_marked; gateway QC/FC signer sets",
+            )
+
+        if not accepted_events:
+            out["L4"] = self._liveness_entry(
+                None,
+                "no accepted QC/FC, so recovery dependencies cannot be observed",
+                "events: trusted_recovery, timeout_round_advance; model clock parameter",
+            )
+        else:
+            deps: List[str] = []
+            if trusted_recovery_used:
+                deps.append("trusted_recovery")
+            if round_change_used:
+                deps.append("extra_consensus_round")
+            if clock_dependency:
+                deps.append("trusted_clock")
+            out["L4"] = self._liveness_entry(
+                not deps,
+                "no administrator/round/clock dependency observed" if not deps else "depends on " + ",".join(deps),
+                "events: trusted_recovery, timeout_round_advance; model parameter",
+            )
+        return out
 
     # ---------- messaging ----------
 
@@ -279,17 +422,41 @@ class Simulator:
 
     # ---------- model rules ----------
 
+    def votes_for_polc(self, w: Witness) -> List[Vote]:
+        """Votes available to a witness when evaluating a PoLC.
+
+        A witness always knows its own votes, so its durable vote log is
+        merged with delivered messages.  ``binding()`` deduplicates a vote
+        that was both signed locally and delivered back by the network.
+        """
+        seen = set()
+        out: List[Vote] = []
+        for v in list(w.volatile.get("observed", [])) + w.signed_votes():
+            # binding() intentionally omits the signer; include witness here so
+            # three independent prevotes are not collapsed into one vote.
+            b = (v.witness,) + v.binding()
+            if b in seen:
+                continue
+            seen.add(b)
+            out.append(v)
+        return out
+
     def update_polc(self, w: Witness) -> None:
         counts: Dict[Tuple[Any, ...], set] = {}
-        for v in w.volatile.get("observed", []):
+        for v in self.votes_for_polc(w):
             if v.kind != "prevote":
                 continue
             k = (v.cp.lock_key(), v.round, v.cp.checkpoint_digest)
             counts.setdefault(k, set()).add(v.witness)
-        for k, signers in counts.items():
+        for k, signers in sorted(counts.items(), key=lambda kv: (kv[0][1], kv[0][2])):
             if len(signers) >= QC_THRESHOLD and list(k) not in w.volatile["polc"]:
                 w.volatile["polc"].append(list(k))
-                self.log("polc_observed", phase="B", actor=w.wid, detail=f"PoLC round={k[1]} digest={k[2][:8]}")
+                self.log(
+                    "polc_observed",
+                    phase="B",
+                    actor=w.wid,
+                    detail=f"PoLC round={k[1]} digest={k[2][:8]} signers={sorted(signers)}",
+                )
 
     def update_polc_gateway(self) -> None:
         counts: Dict[Tuple[Any, ...], set] = {}
@@ -305,11 +472,41 @@ class Simulator:
                     observed.append(list(k))
 
     def has_polc(self, w: Witness, cp: Checkpoint, round: int) -> bool:
-        return list((cp.lock_key(), round, cp.checkpoint_digest)) in [
-            list(x) for x in w.volatile.get("polc", [])
-        ] or [
-            list(x) for x in w.volatile.get("polc", [])
-        ].count(list((cp.lock_key(), round, cp.checkpoint_digest))) > 0
+        """Exact-round PoLC: no old-round evidence may be reused (S4)."""
+        target = [cp.lock_key(), round, cp.checkpoint_digest]
+        return any(list(x) == target for x in w.volatile.get("polc", []))
+
+    def find_unlock_polc(
+        self, w: Witness, cp: Checkpoint, locked: Dict[str, Any], current_round: int
+    ) -> Optional[int]:
+        """PoLC that may legally transfer a lock.
+
+        Tendermint's condition is strictly
+        ``locked_round < polc_round < current_round`` and the PoLC must bind a
+        *different* digest on the same chain / witness set / epoch.  Same-round
+        or lower-round PoLC, and merely entering a higher round, never unlock.
+        """
+        locked_round = locked["round"]
+        locked_digest = locked["digest"]
+        valid_rounds: List[int] = []
+        for entry in w.volatile.get("polc", []):
+            e = list(entry)
+            if len(e) != 3 or tuple(e[0]) != cp.lock_key():
+                continue
+            polc_round, digest = e[1], e[2]
+            if digest == locked_digest:
+                continue
+            if locked_round < polc_round < current_round:
+                valid_rounds.append(polc_round)
+        return min(valid_rounds) if valid_rounds else None
+
+    def lock_state(self, w: Witness) -> Optional[Dict[str, Any]]:
+        """Current durable lock for a witness (single binding namespace)."""
+        locked = w.durable.get("locked", {})
+        if not locked:
+            return None
+        key = sorted(locked)[0]
+        return locked[key]
 
     def lease_expired_for(self, w: Witness, rec: Dict[str, Any]) -> bool:
         expires = rec.get("expires_at")
@@ -355,24 +552,54 @@ class Simulator:
                 return False, "lease still active; pending lock conflict"
             return True, "lease rule allows signature"
 
-        # Model B: simplified Tendermint-style lock transfer.
+        # Model B: Tendermint-style lock / PoLC state machine (R1 corrected).
+        #
+        # Explicit state, never conflated:
+        #   current_round = w.volatile["current_round"] (advanced by timeout only)
+        #   locked_round  = locked["round"]   (durable, set by precommit)
+        #   locked_digest = locked["digest"]
+        #   polc_round    = the round at which a 3-of-4 prevote set was observed
+        #   polc_digest   = digest that the PoLC binds
         locked = w.durable.get("locked", {}).get(keystr(cp.lock_key()))
+        current_round = max(w.volatile.get("current_round", 0), round)
+
         if kind == "prevote":
-            if locked and locked["digest"] != cp.checkpoint_digest and round <= locked["round"]:
-                if self.has_polc(w, cp, round):
-                    return True, "higher-round PoLC permits lock transfer"
-                return False, "locked witness cannot prevote conflicting checkpoint without higher-round PoLC"
-            return True, "prevote rule allows signature"
+            if locked and locked["digest"] != cp.checkpoint_digest:
+                unlock_round = self.find_unlock_polc(w, cp, locked, current_round)
+                if unlock_round is None:
+                    return False, (
+                        f"locked at round {locked['round']} for different digest; "
+                        f"conflicting prevote needs locked_round < polc_round < current_round "
+                        f"({locked['round']} < polc_round < {current_round}); none observed"
+                    )
+                return True, (
+                    f"lock transfer allowed by PoLC round {unlock_round}: "
+                    f"{locked['round']} < {unlock_round} < {current_round}, digest={cp.checkpoint_digest[:8]}"
+                )
+            return True, "prevote rule allows signature (no conflicting lock)"
+
         if kind == "precommit":
+            # Precommit requires a PoLC in the *same round* for the same cp;
+            # an old-round PoLC must not be reinterpreted (S4).
             if not self.has_polc(w, cp, round):
-                return False, "precommit requires observed PoLC for same checkpoint/round"
+                return False, "precommit requires PoLC observed for same checkpoint and exact round"
+            # A witness that is locked on a conflicting digest must also satisfy
+            # the strict lock-transfer condition before it may precommit.
+            if locked and locked["digest"] != cp.checkpoint_digest:
+                unlock_round = self.find_unlock_polc(w, cp, locked, round)
+                if unlock_round is None:
+                    return False, (
+                        "precommit for conflicting digest blocked: "
+                        f"no qualifying PoLC with {locked['round']} < polc_round < {round}"
+                    )
             has_prevote = any(
                 v.kind == "prevote" and v.round == round and v.cp.full_key() == cp.full_key()
                 for v in w.signed_votes()
             )
             if not has_prevote:
-                return False, "precommit requires own prevote in same round"
-            return True, "precommit rule allows signature"
+                return False, "precommit requires own prevote in the same round"
+            return True, "current-round PoLC + own prevote allow precommit and lock update"
+
         return False, f"unsupported vote kind for Model B: {kind}"
 
     # ---------- signing ----------
@@ -400,9 +627,21 @@ class Simulator:
         issued = w.now(self.time)
         expires = issued + (lease if lease is not None else LEASE_DURATION) if self.model == "C" else None
         vote = Vote(kind=kind, witness=wid, round=round, cp=cp, issued_at=issued, expires_at=expires, nonce=nonce)
-        w.add_vote(vote)
 
         durable_change = "signed vote appended to durable vote log"
+        # R1: for Model B the durable lock is written *before* the vote is
+        # recorded, so lock state and vote log cannot disagree, and both are
+        # committed before the signature is returned to the caller.  This is
+        # simulator state discipline only, not a claim of crash-safe storage.
+        if self.model == "B" and kind == "precommit":
+            w.durable.setdefault("locked", {})[keystr(cp.lock_key())] = {
+                "round": round,
+                "digest": cp.checkpoint_digest,
+            }
+            w.volatile["current_round"] = max(w.volatile.get("current_round", 0), round)
+            durable_change = "lockedQC written before vote-log append for precommit"
+        w.add_vote(vote)
+
         if kind in ("candidate", "prevote") and self.model in ("A", "C", "UNSAFE"):
             w.durable.setdefault("pending", {})[keystr(cp.lock_key())] = {
                 "digest": cp.checkpoint_digest,
@@ -410,13 +649,6 @@ class Simulator:
                 "expires_at": expires,
             }
             durable_change = "pending lock written before/at signature"
-        if self.model == "B" and kind == "precommit":
-            w.durable.setdefault("locked", {})[keystr(cp.lock_key())] = {
-                "round": round,
-                "digest": cp.checkpoint_digest,
-            }
-            w.volatile["current_round"] = max(w.volatile.get("current_round", 0), round)
-            durable_change = "lockedQC updated by precommit"
 
         if force_byzantine_conflict:
             self.adversarial(f"Byzantine {wid} signed conflicting {kind} digest={cp.checkpoint_digest[:8]} round={round}")
@@ -608,9 +840,7 @@ class Simulator:
         for i in range(1, 6):
             code = f"S{i}"
             safety[code] = not any(v["invariant"] == code for v in self.violations)
-        liveness = {k: bool(v["passed"]) for k, v in self.liveness.items()}
-        for k in ("L1", "L2", "L3", "L4"):
-            liveness.setdefault(k, False)
+        liveness = self.derive_liveness()
         return {
             "scenario_id": self.scenario_id,
             "model": self.model,
@@ -624,7 +854,8 @@ class Simulator:
             "gateway_fc": self.gateway.fc,
             "safety": safety,
             "liveness": liveness,
-            "liveness_notes": {k: v["note"] for k, v in self.liveness.items()},
+            "liveness_notes": {k: v["note"] for k, v in liveness.items()},
+            "author_liveness_r0": dict(self.author_liveness_r0),
             "violations": self.violations,
             "adversarial_observations": self.adversarial_observations,
             "notes": self.notes,

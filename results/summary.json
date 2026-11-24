@@ -1,11 +1,15 @@
 {
+  "base_commit": "d7ed7970900cff561f927c42ff025ad844eea6f7",
+  "liveness_source": "derived from recorded events and final state; not_applicable when precondition is absent",
+  "model_b_lock_transfer": "locked_round < polc_round < current_round; same/lower round PoLC never unlocks",
   "models": [
     "A",
     "B",
     "C"
   ],
   "note": "Safety and liveness are reported separately. Simulator results are not a BFT soundness proof.",
-  "scenario_count": 39,
+  "revision": "R1",
+  "scenario_count": 48,
   "seed": 20261124,
   "unsafe_counterexample": "U1-UNSAFE"
 }

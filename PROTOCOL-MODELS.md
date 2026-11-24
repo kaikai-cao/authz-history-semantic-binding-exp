@@ -80,21 +80,41 @@ observed_votes[]
 polc[]              # (lock_key, round, digest)，由 >=3 个 prevote 形成
 ```
 
-### 规则
+> **R1 修正**：R0 的规则把锁转移条件写反了（`round > locked_round` 时无需 PoLC 就允许冲突
+> prevote；`round <= locked_round` 时反而允许同轮 PoLC 解锁）。R1 按 Tendermint 规范改为
+> 严格三段不等式，并显式区分五个状态量：
+>
+> ```text
+> current_round   : 由 timeout 推进的当前轮次
+> locked_round    : 持久化锁的轮次（precommit 时写入）
+> locked_digest   : 持久化锁绑定的 digest
+> polc_round      : 观察到 3-of-4 prevote 集合的轮次
+> polc_digest     : 该 PoLC 绑定的 digest
+> ```
+>
+> 禁止混用 `polc_round` 与 `current_round`。
+
+### 规则（R1）
 
 1. `prevote`：
-   - 若已锁定冲突 digest 且 `round <= locked_round`，拒绝；
-   - 若观察到更高轮次、同 checkpoint 的 PoLC，可以改变锁定目标；
+   - 无锁或锁的 digest 与提案相同：允许；
+   - 已锁定冲突 digest：只有当存在 PoLC 满足
+     `locked_round < polc_round < current_round`，且该 PoLC 绑定同一 chain/witness_set/epoch
+     与不同 digest 时，才允许解除原锁并 prevote 新 digest；
+   - **仅进入更高轮次不允许改变锁定目标；同轮或低轮 PoLC 不允许解锁**（R1-B1/B2/B4）；
    - 同轮同 Witness 不得对两个冲突 digest prevote（S1）。
 2. `precommit`：
-   - 必须观察到**同一轮次、同一 checkpoint** 的 PoLC；
+   - 必须观察到**同一轮次、同一 checkpoint** 的精确 PoLC（旧轮 PoLC 不复用，R1-B8）；
+   - 若已锁定冲突 digest，还须满足同一严格解锁不等式；
    - 自己必须在该轮次 prevote 过同一 checkpoint；
-   - precommit 写入 `locked`。
+   - 先写持久化 `locked`，再追加投票日志，两者都在返回签名前完成（仅模拟器状态纪律，
+     不声称 crash-safe storage）。
 3. `timeout`：
    - 只推进 `current_round`；
    - 不清除 `locked`，不单独构成解锁证明。
 4. `PoLC`：
-   - 由至少 3 个不同 Witness 的同轮同 digest prevote 形成；
+   - 由至少 3 个**不同** Witness 的同轮同 digest prevote 形成；
+   - Witness 自己的投票与收到的消息合并统计，按 `(witness, vote.binding())` 去重（R1-B5）；
    - 单个签名或单方观察不构成 PoLC。
 5. Gateway QC：
    - 至少 3 个同轮、同 checkpoint 的 precommit；
@@ -104,9 +124,9 @@ polc[]              # (lock_key, round, digest)，由 >=3 个 prevote 形成
    - Witness 若观察到更高轮、冲突 checkpoint 的 PoLC，拒绝为旧 digest 签 FC；
    - Gateway 要求 3 个绑定同一 checkpoint 与 nonce 的 FC 签名。
 7. 重启：
-   - 完整状态恢复；
+   - 完整状态恢复时保留 `locked_round` / `locked_digest`（R1-B7）；
    - pending 记录丢失时，从 signed precommit 重建 locked；
-   - 若所有持久化投票状态丢失，本模型无法本地恢复，属外部假设。
+   - 若所有持久化投票状态丢失，本模型无法本地恢复，属外部假设（AL1）。
 
 ### 明确不声明
 
@@ -115,9 +135,10 @@ polc[]              # (lock_key, round, digest)，由 >=3 个 prevote 形成
 - 不声称继承 Tendermint/HotStuff 的安全证明；
 - 只比较“锁何时可以转移”这一条协议结构。
 
-### 结论标签
+### 结论标签（R1）
 
-由协议规则推导 + 模拟器验证；活性仍依赖最终通信。
+由协议规则推导 + 模拟器验证；活性仍依赖最终通信与解锁 quorum 的形成条件。
+R1-B1–B8 验证严格锁转移；P8-B 显示锁定节点无解锁 quorum 时不可恢复。
 
 ## 3. Model C — Bounded Lease
 
