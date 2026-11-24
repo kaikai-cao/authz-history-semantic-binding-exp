@@ -18,15 +18,15 @@
 
 **Halo2 结构元数据（运行时精确，经 `pinned()` 官方视图）：**
 
-| 指标 | 值 |
-| --- | --- |
-| fixed columns | 9 |
-| advice columns | 39 |
-| instance columns | 1（8 个 public 值占 row 0..7） |
-| selectors | 30（源码显式 27 + Poseidon 内部 3） |
-| gate families | 28 |
-| constraint polynomials | 43 |
-| degree | 3 |
+| 指标 | 值 | 数据来源 |
+| --- | --- | --- |
+| fixed columns | 9 | 运行时 `CircuitMeta` 探针 |
+| advice columns | 39 | 运行时 `CircuitMeta` 探针 |
+| instance columns | 1（8 个 public 值占 row 0..7） | 运行时 `CircuitMeta` 探针 |
+| selectors | 30（源码显式 27 + Poseidon 内部 3） | 运行时 `CircuitMeta` 探针 |
+| constraint polynomials | 43 | 运行时 `CircuitMeta` 探针 |
+| gate families | 28 | 源码静态分析（`meta.create_gate` 计数），非探针字段 |
+| degree | 3 | 源码静态分析（`scan-id-neq` 三次项），非探针字段 |
 
 **Poseidon permutation 归因（共 505）：**
 
@@ -48,7 +48,7 @@
 | --- | --- |
 | A 全树扫描 | 语义完整基线，保留不改 |
 | B Poseidon Canonical Slot | 探测完整性最坏退回 O16；与 D3-01 SHA-256 `D3-SLOT-v1` 不兼容、需新 slot 版本；host 算 slot 不可信。理论可行但成本收益不明确，不实现 |
-| C 独立 ID 索引树 | 理论最有希望（O(log n) 局部非成员），但需新增索引状态根 → 破坏 8-instance 冻结；本轮只做 host 实验，不接电路 |
+| C 独立 ID 索引树 | 理论最有希望（O(log n) 局部非成员），但需新增索引状态根与一致性约束；公开接口可新增实例或并入 `C_prev/C_next`（不必然增加 8 值数量，但需承诺版本升级）；R3 仅 BTreeSet host 模型、非密码学索引树，不接电路 |
 | D 排序 ID 集合 | 相邻关系证明最坏退回 O16；双集合顺序维护复杂；成本收益不明确，不实现 |
 
 ## 5. Phase 3：安全分析与成本模型
@@ -71,12 +71,13 @@
 
 → 验证 Phase 2 论断：B 最坏情况仍需 O16 探测，无渐进优势。
 
-**候选 C（ID 索引树）：**
-- 非空 S0（15 个 ID）非成员检查 4 步（=log2 16）vs 全扫描 16 槽
+**候选 C（BTreeSet host 模型，非密码学索引树）：**
+- 用 `BTreeSet<F>` + 二分搜索模拟；非空 S0（15 个 ID）非成员检查 4 步（=log2 16）vs 全扫描 16 槽
+- 该 4 步是排序集合比较次数，**未实现** Poseidon Merkle 索引树、索引 root、电路内 non-membership opening 或索引-GR/RR 一致性约束
 - Parent 已撤销被正确拒绝、Parent 活跃可派生、重复 Revoke 在第二事件被检测
 - 第二事件能看到事件 0 的插入（状态链在 host 层自洽）
 
-→ C 在 host 逻辑层可行且有明显步数优势，但**需额外状态根与双树一致性，未接入 Halo2、未测量证明成本**。
+→ C 的逻辑方向在 host 层成立，但这是排序集合模型，**不构成密码学结构验证**；需额外状态根与双树一致性，未接入 Halo2、未测量证明成本。真正的可认证索引结构对比留待 EXP-D3-04。
 
 ## 7. 验收检查
 
@@ -90,7 +91,7 @@
 
 **结论落入第 2 类：理论可行但成本收益不明确——保留设计，暂不替换。**
 
-- 候选 C（独立 ID 索引树）是理论上最有希望降低全树扫描成本的方向（host 层非成员 4 步 vs 16 槽），但需新增索引状态根与 public instance，超出本轮冻结边界，"一次 opening 更便宜"未经 Halo2 实测。
+- 候选 C（独立 ID 索引树）是理论上最有希望降低全树扫描成本的方向，但需新增索引状态根与一致性约束；公开接口可新增实例或并入 `C_prev/C_next`（不必然增加 8 个 public 值数量，但需承诺语义/域分离版本升级），超出本轮冻结边界。R3 的"host 层非成员 4 步 vs 16 槽"准确说是 `BTreeSet` 排序集合二分搜索比较次数，**不是密码学索引树的 opening 成本**；"一次 opening 更便宜"未经 Halo2 实测。
 - 候选 B/D 在证明无跳过/相邻上最坏退回 O16，成本收益不明确。
 - 候选 A（E-R1 全树扫描）继续作为语义完整基线保留，无需回滚或替换。
 

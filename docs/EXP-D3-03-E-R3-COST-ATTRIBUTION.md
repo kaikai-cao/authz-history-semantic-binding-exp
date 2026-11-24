@@ -25,20 +25,21 @@
 - 列数/selector/门多项式数来自 Halo2 自身的 `pinned()` debug 视图（运行 `Circuit::configure` 后读取），**不是**源码行数估算。
 - proving time 为 E-R1 benchmark 的固定单线程 3 采样中位数，属墙钟实测，不构成严格分布结论。
 
-## 1. Halo2 电路结构元数据（运行时精确）
+## 1. Halo2 电路结构元数据（运行时探针 + 源码静态分析）
 
 读取方式：`src/transition/e_r3_stats.rs` 调用公开的 `Circuit::configure` 填充 `ConstraintSystem`，再经公开的 `cs.pinned()` debug 视图取 Halo2 内部计数。该模块为 R3 新增只读探针，不触碰任何冻结电路文件。测试入口：`tests/d3_03_e_r3_attrib.rs`。
 
-| 指标 | E-R1 值 | 说明 |
-| --- | --- | --- |
-| fixed columns | 9 | Poseidon rc_a/rc_b 各 3 + p_bit + weight + bit_weight |
-| advice columns | 39 | 37 显式 + state[3]（`(0..3).map` 一行分配 3 列） |
-| instance columns | 1 | 8 个 public 值占用 row 0..7 |
-| selectors | 30 | 源码显式 27 + Poseidon `Pow5Chip::configure` 内部 3（`s_full/s_partial/s_pad_and_add`） |
-| gate families | 28 | 源码 `meta.create_gate` 调用数 |
-| constraint polynomials | 43 | Halo2 `pinned()` gates 扁平化后顶层元素数 |
-| degree | 3 | `scan-id-neq` 三次项决定 |
-| blinding factors | — | Halo2 按 advice 查询数计算 |
+| 指标 | E-R1 值 | 数据来源 | 说明 |
+| --- | --- | --- | --- |
+| fixed columns | 9 | 运行时探针（`CircuitMeta`） | Poseidon rc_a/rc_b 各 3 + p_bit + weight + bit_weight |
+| advice columns | 39 | 运行时探针（`CircuitMeta`） | 37 显式 + state[3]（`(0..3).map` 一行分配 3 列） |
+| instance columns | 1 | 运行时探针（`CircuitMeta`） | 8 个 public 值占用 row 0..7 |
+| selectors | 30 | 运行时探针（`CircuitMeta`） | 源码显式 27 + Poseidon `Pow5Chip::configure` 内部 3（`s_full/s_partial/s_pad_and_add`） |
+| constraint polynomials | 43 | 运行时探针（`CircuitMeta`） | Halo2 `pinned()` gates 扁平化后顶层元素数 |
+| gate families | 28 | **源码静态分析** | `attrib` 测试统计 `meta.create_gate` 文本出现数；不是 `CircuitMeta` 字段 |
+| degree | 3 | **源码静态分析** | 由 `scan-id-neq` 门 `fl*bf*((a−b)*inv−1)` 的三次乘积项推断；探针未直接输出 degree 字段 |
+
+**口径修正（EXP-D3-04 Phase 0）**：上表前五行来自 `e_r3_stats.rs::CircuitMeta` 的 `pinned()` 运行时探针；后两行（gate families、degree）来自源码静态分析，**不应归入"运行时精确统计"**。R3 初版把它们与前五行并列未区分来源，此处更正。
 
 **为什么源码 grep 与运行时值不同：** advice 列源码 `meta.advice_column()` 出现 37 处文字，但其中 `(0..3).map(|_| meta.advice_column())` 一行分配 3 列，故运行时 39。selector 源码 27 处，但 Poseidon chip 内部另建 3 个，故运行时 30。这正是必须用 Halo2 运行时计数而非文本计数的原因。
 
