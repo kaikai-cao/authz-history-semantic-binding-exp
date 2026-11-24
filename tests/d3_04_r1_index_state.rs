@@ -442,13 +442,25 @@ fn r1_auth_opening_recomputes_root_after_transitions() {
 fn r1_auth_empty_slot_nonmembership() {
     let mut ix = IndexSmtR1::new(4);
     ix.seed(id(7), IdState::Active).unwrap();
-    let target = id(999);
+    // 1000 & 15 = 8, while slot 7 holds id(7).  The target MUST land in an
+    // unused slot so the empty-leaf opening is actually exercised.
+    let target = id(1000);
     let s = ix.slot_of(target).unwrap();
-    if ix.slots[s].is_empty() {
-        let path = ix.opening(s);
-        assert_eq!(ix.verify_path(s, Leaf::Empty, &path), ix.root());
-    }
+    assert_eq!(s, 8, "test target must land in an unused slot");
+    assert_eq!(
+        ix.slots[s],
+        Leaf::Empty,
+        "target slot must be an empty leaf"
+    );
+
+    let path = ix.opening(s);
+    assert_eq!(
+        ix.verify_path(s, Leaf::Empty, &path),
+        ix.root(),
+        "empty-leaf non-membership opening must recompute the index root"
+    );
     assert_eq!(ix.get(target), Ok(IdState::Absent));
+    println!("R1_AUTH empty-slot nonmembership slot={s} opening_verified");
 }
 
 #[test]

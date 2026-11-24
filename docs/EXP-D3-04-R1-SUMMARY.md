@@ -51,8 +51,8 @@ apply_revoke(target_id)         // ACTIVE(target) → target=REVOKED
 | 类别 | 测试数 | 覆盖 |
 | --- | --- | --- |
 | 数据结构与 ID 表示 | 3 | ID=0 全入口拒绝、三种叶子哈希互异、最大合法 ID 与槽位碰撞边界 |
-| 状态转换执行 | 6 | ABSENT→ACTIVE、重复 Grant、REVOKED 再 Grant、父非 ACTIVE、ACTIVE→REVOKED、重复/不存在 Revoke、两事件顺序 |
-| 认证关系 | 7 | opening 重算根、空槽 non-membership、已占槽不同完整 ID 查询、截断键碰撞拒绝、伪造状态/错误路径/错误槽位、跨索引 opening 失败、根随合法转换变化 |
+| 状态转换执行 | 7 | ABSENT→ACTIVE、重复 Grant、REVOKED 再 Grant、父非 ACTIVE、ACTIVE→REVOKED、重复/不存在 Revoke、两事件顺序 |
+| 认证关系 | 6 | opening 重算根、空槽 non-membership、已占槽不同完整 ID 查询、截断键碰撞拒绝、伪造状态/错误路径/错误槽位、跨索引 opening 失败（根随合法转换变化计入状态转换类） |
 
 关键结果：
 - 合法转换前后根必变；所有被拒转换前后根**严格不变**。
