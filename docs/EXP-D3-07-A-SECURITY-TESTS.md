@@ -64,7 +64,7 @@ A22–A28 share one keygen and one honest GG proof. A24 and A28 jointly confirm 
 
 ## 6. Trusted config and profile fail-closed tests (R1)
 
-All eight cases below enter `verify_anchor` with a complete envelope. They are not rejected by a test helper; A29/A30 additionally clear the QC signatures to show that a bad threshold cannot admit a zero-signature QC. A35/A36 use a validly re-signed QC so that only the profile field is wrong.
+All eight cases below enter `verify_anchor` with a complete envelope. They are not rejected by a test helper; A29/A30 additionally clear the QC signatures to show that a bad threshold cannot admit a zero-signature QC. A35/A36 use a re-signed envelope so that only the profile field differs from the valid control; because profile checks run before QC verification, these tests do not claim that the QC path was executed.
 
 | Case | Condition | Expected error | Result |
 | --- | --- | --- | --- |

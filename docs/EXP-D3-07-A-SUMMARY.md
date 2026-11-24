@@ -94,7 +94,7 @@ A01–A36 all passed:
 - A22–A28: combined verification, including proof-failure no-commit checks;
 - A29–A36: trusted-config and anchor-profile fail-closed checks, including a zero-signature QC with `threshold = 0`.
 
-Negative cases enter the actual verifier/binding/combined path. A09–A12 and A35/A36 are re-signed so the QC path succeeds and the intended binding/profile check rejects them; A29/A30 clear the QC signatures but are rejected by config validation first.
+Negative cases enter the actual verifier/binding/combined path. A09–A12 are re-signed so the QC path succeeds and the intended binding check rejects them; A35/A36 use re-signed envelopes but profile checks precede QC verification, so these tests do not claim the QC path was executed; A29/A30 clear the QC signatures but are rejected by config validation first.
 
 Full `cargo test --release` result after R1: **374 passed / 0 failed / 3 ignored**. `cargo fmt --all -- --check` and `git diff --check` both pass.
 
