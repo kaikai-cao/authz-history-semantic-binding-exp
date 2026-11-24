@@ -2,6 +2,8 @@
 
 本目录是一个**独立、只读于冻结仓库**的协议审计与确定性模拟实验。它研究四节点、3-of-4 quorum、最多一个 Byzantine Witness 条件下，checkpoint 候选已签名但 QC 未被观察到时，pending lock 如何恢复。
 
+> **D3-07-B-P2 设计审计入口（新增，不改写 P1 历史结论）**：在冻结基线 `exp-d3-07-b-p1-r1-c1` @ `2b84300` 之上，新增分支 `exp-d3-07-b-p2-design`，只做 Model B Witness 协议设计审计，不实现协议、不改 Halo2、不改冻结仓库。五份文档位于 `docs/`：`EXP-D3-07-B-P2-PROTOCOL.md`（状态定义与消息）、`...-STATE-MACHINE.md`（锁转移完整规则）、`...-CRASH-ANALYSIS.md`（八类崩溃）、`...-SECURITY-ARGUMENT.md`（Safety/Liveness 与 Gateway 集成边界）、`...-REFERENCES.md`（Tendermint/CometBFT、TUF、RFC 9162 原始条款核验）。P1 的 `src/`、`tests/`、`results/` 与 R0/R1/R1-C1 结果未改动。本轮结论是设计草案，非形式化安全证明，不宣称 globally latest；完成后暂停，不进 P3。
+
 R0 审计提交在孤立分支 `exp-d3-07-b-p1-audit`（`d7ed797`）。R1 修正分支为 `exp-d3-07-b-p1-r1`（`41e1742`），保留 R0 历史、不重写提交。R1-C1 分支为 `exp-d3-07-b-p1-r1-c1`，追加"显式轮次推进"约束，不改变前两轮结论。本轮不实现 FC、不改 Halo2、不改 D3-06-C 或 D3-07-A，不修改任何冻结仓库。
 
 ## 0. R1 对 R0 的修正摘要
