@@ -14,6 +14,11 @@ pub mod circuit;
 pub mod constants;
 pub mod e_circuit;
 pub mod e_constants;
+pub mod e_r1_circuit;
+pub mod e_r1_constants;
+pub mod e_r1_types;
+pub mod e_r1_types_host;
+pub mod e_r1_uniqueness;
 pub mod e_types;
 pub mod e_types_host;
 pub mod types;
@@ -37,6 +42,18 @@ pub use constants::{
 };
 pub use e_circuit::{TransitionCircuitE, TransitionConfigE};
 pub use e_constants::{K_E, MAX_ACTIVE_EVENTS};
+pub use e_r1_circuit::{TransitionCircuitR1, TransitionConfigR1};
+pub use e_r1_constants::K_R1;
+pub use e_r1_types::r1_instances;
+pub use e_r1_types::{
+    build_scenario_r1, final_roots_r1, grant_event_commitment_r1, revoke_event_commitment_r1,
+    EventSpecR1, EventWitnessR1, TransitionWitnessR1,
+};
+pub use e_r1_types_host::blank_r1;
+pub use e_r1_uniqueness::{
+    active_gr_ids, active_rr_ids, empty_scan, gr_root_of, neq_inv, rr_root_of, scan_from_slots,
+    GrLeafR1, RrLeafR1, TreeScanR1,
+};
 pub use e_types::{
     build_scenario_e, final_roots_e, grant_event_commitment_e, revoke_event_commitment_e,
     EventSpecE, EventWitnessE, TransitionWitnessE,
