@@ -1,0 +1,11 @@
+{
+  "models": [
+    "A",
+    "B",
+    "C"
+  ],
+  "note": "Safety and liveness are reported separately. Simulator results are not a BFT soundness proof.",
+  "scenario_count": 39,
+  "seed": 20261124,
+  "unsafe_counterexample": "U1-UNSAFE"
+}

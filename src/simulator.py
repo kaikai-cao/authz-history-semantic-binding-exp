@@ -1,0 +1,646 @@
+"""Deterministic protocol simulator for D3-07-B-P1.
+
+No cryptography is performed here.  Votes are structured objects whose
+binding fields model what a signed message would commit to.  The simulator is
+used only to compare recovery rules under prescribed schedules.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+SEED = 20261124
+WITNESS_COUNT = 4
+QC_THRESHOLD = 3
+FC_THRESHOLD = 3
+BYZANTINE_LIMIT = 1
+LEASE_DURATION = 100
+CLOCK_EPSILON = 5
+
+WITNESS_IDS = ("W1", "W2", "W3", "W4")
+VALID_MODELS = ("A", "B", "C", "UNSAFE")
+
+
+def keystr(key: Tuple[Any, ...]) -> str:
+    return "|".join(str(x) for x in key)
+
+
+@dataclass(frozen=True)
+class Checkpoint:
+    chain_id: str
+    witness_set_id: str
+    epoch: int
+    checkpoint_digest: str
+    parent_digest: str
+    transition_version: str = "d3-transition-v1"
+
+    def lock_key(self) -> Tuple[str, str, int]:
+        return (self.chain_id, self.witness_set_id, self.epoch)
+
+    def full_key(self) -> Tuple[Any, ...]:
+        return self.lock_key() + (
+            self.checkpoint_digest,
+            self.parent_digest,
+            self.transition_version,
+        )
+
+    def conflicts(self, other: "Checkpoint") -> bool:
+        return self.lock_key() == other.lock_key() and self.checkpoint_digest != other.checkpoint_digest
+
+
+@dataclass(frozen=True)
+class Vote:
+    kind: str
+    witness: str
+    round: int
+    cp: Checkpoint
+    issued_at: int
+    expires_at: Optional[int] = None
+    nonce: Optional[str] = None
+
+    def binding(self) -> Tuple[Any, ...]:
+        return (self.kind, self.round) + self.cp.full_key() + (self.nonce,)
+
+
+@dataclass
+class Witness:
+    wid: str
+    honest: bool = True
+    durable: Dict[str, Any] = field(default_factory=dict)
+    volatile: Dict[str, Any] = field(default_factory=dict)
+    clock_offset: int = 0
+
+    def now(self, global_time: int) -> int:
+        return global_time + self.clock_offset
+
+    def signed_votes(self) -> List[Vote]:
+        return list(self.durable.get("signed_votes", []))
+
+    def add_vote(self, vote: Vote) -> None:
+        self.durable.setdefault("signed_votes", []).append(vote)
+
+    def floor(self) -> Tuple[int, str]:
+        votes = self.signed_votes()
+        if not votes:
+            return (-1, "")
+        highest = max(v.round for v in votes)
+        digests = sorted({v.cp.checkpoint_digest for v in votes if v.round == highest})
+        return (highest, digests[0] if digests else "")
+
+
+@dataclass
+class Gateway:
+    model: str
+    observed: List[Vote] = field(default_factory=list)
+    qc: List[Dict[str, Any]] = field(default_factory=list)
+    fc: List[Dict[str, Any]] = field(default_factory=list)
+    committed: Dict[str, str] = field(default_factory=dict)
+    decisions: List[str] = field(default_factory=list)
+
+
+class Simulator:
+    """One deterministic scenario instance."""
+
+    def __init__(self, model: str, scenario_id: str, description: str) -> None:
+        if model not in VALID_MODELS:
+            raise ValueError(f"unknown model: {model}")
+        self.model = model
+        self.scenario_id = scenario_id
+        self.description = description
+        self.seed = SEED
+        self.time = 0
+        self.seq = 0
+        self.events: List[Dict[str, Any]] = []
+        self.messages: List[Dict[str, Any]] = []
+        self.violations: List[Dict[str, str]] = []
+        self.adversarial_observations: List[str] = []
+        self.liveness: Dict[str, Dict[str, Any]] = {}
+        self.notes: List[str] = []
+        self.initial_state: Dict[str, Any] = {}
+        self.witnesses: Dict[str, Witness] = {
+            wid: Witness(
+                wid=wid,
+                durable={
+                    "signed_votes": [],
+                    "pending": {},
+                    "locked": {},
+                    "committed": {},
+                    "current_round": 0,
+                },
+                volatile={"observed": [], "polc": [], "current_round": 0},
+            )
+            for wid in WITNESS_IDS
+        }
+        self.gateway = Gateway(model=model)
+
+    # ---------- event log ----------
+
+    def snapshot(self) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        for wid, w in self.witnesses.items():
+            floor_round, floor_digest = w.floor()
+            out[wid] = {
+                "honest": w.honest,
+                "pending": {
+                    keystr(k): {"digest": v["digest"], "round": v["round"], "expires_at": v.get("expires_at")}
+                    for k, v in w.durable.get("pending", {}).items()
+                },
+                "locked": {keystr(k): v for k, v in w.durable.get("locked", {}).items()},
+                "committed": {keystr(k): v for k, v in w.durable.get("committed", {}).items()},
+                "current_round": w.volatile.get("current_round", 0),
+                "signed_votes": len(w.signed_votes()),
+                "floor_round": floor_round,
+                "floor_digest": floor_digest,
+                "clock_offset": w.clock_offset,
+            }
+        return out
+
+    def log(
+        self,
+        action: str,
+        *,
+        phase: str = "",
+        actor: str = "",
+        detail: str = "",
+        message: str = "",
+        signature_time: Optional[int] = None,
+        durable_change: str = "",
+        qc_formed: str = "",
+        fc_formed: str = "",
+        gateway_decision: str = "",
+    ) -> None:
+        self.seq += 1
+        self.events.append(
+            {
+                "global_event_seq": self.seq,
+                "sim_time": self.time,
+                "phase": phase,
+                "actor": actor,
+                "action": action,
+                "detail": detail,
+                "message": message,
+                "signature_time": signature_time,
+                "durable_change": durable_change,
+                "qc_formed": qc_formed,
+                "fc_formed": fc_formed,
+                "gateway_decision": gateway_decision,
+                "witness_state": self.snapshot(),
+            }
+        )
+
+    def advance(self, dt: int, phase: str = "") -> None:
+        self.time += dt
+        self.log("clock_advance", phase=phase, detail=f"advanced {dt} time units to t={self.time}")
+        self.deliver_due(phase=phase)
+
+    def set_clock_offset(self, wid: str, offset: int, phase: str = "") -> None:
+        self.witnesses[wid].clock_offset = offset
+        self.log("clock_offset_set", phase=phase, actor=wid, detail=f"clock_offset={offset}")
+
+    def set_gateway_time(self, t: int, phase: str = "") -> None:
+        self.time = t
+        self.log("gateway_time_set", phase=phase, actor="G", detail=f"gateway time set to {t}")
+        self.deliver_due(phase=phase)
+
+    def mark_byzantine(self, wid: str, phase: str = "") -> None:
+        self.witnesses[wid].honest = False
+        self.log("byzantine_marked", phase=phase, actor=wid, detail="witness treated as Byzantine for this scenario")
+
+    def note(self, text: str) -> None:
+        self.notes.append(text)
+
+    def violation(self, invariant: str, detail: str) -> None:
+        self.violations.append({"invariant": invariant, "detail": detail})
+
+    def adversarial(self, detail: str) -> None:
+        self.adversarial_observations.append(detail)
+
+    def set_liveness(self, code: str, passed: bool, note: str) -> None:
+        self.liveness[code] = {"passed": bool(passed), "note": note}
+
+    # ---------- messaging ----------
+
+    def send(self, vote: Vote, recipients: List[str], delay: int = 0, phase: str = "", drop: bool = False) -> Optional[int]:
+        if vote is None:
+            return None
+        mid = len(self.messages) + 1
+        self.messages.append(
+            {
+                "id": mid,
+                "vote": vote,
+                "recipients": list(recipients),
+                "due": self.time + delay,
+                "delivered": False,
+                "dropped": drop,
+            }
+        )
+        self.log(
+            "message_send",
+            phase=phase,
+            actor=vote.witness,
+            detail=f"{vote.kind} {vote.cp.checkpoint_digest[:8]} round={vote.round}",
+            message=f"msg#{mid} -> {','.join(recipients)} due=t{self.time + delay} drop={drop}",
+            signature_time=vote.issued_at,
+        )
+        return mid
+
+    def deliver_due(self, phase: str = "") -> None:
+        for msg in self.messages:
+            if msg["delivered"] or msg["dropped"] or msg["due"] > self.time:
+                continue
+            msg["delivered"] = True
+            for recipient in msg["recipients"]:
+                if recipient == "G":
+                    self.gateway.observed.append(msg["vote"])
+                elif recipient in self.witnesses:
+                    self.witnesses[recipient].volatile.setdefault("observed", []).append(msg["vote"])
+                    if self.model == "B":
+                        self.update_polc(self.witnesses[recipient])
+                self.log(
+                    "message_receive",
+                    phase=phase or "delivery",
+                    actor=recipient,
+                    detail=f"received {msg['vote'].kind} {msg['vote'].cp.checkpoint_digest[:8]} round={msg['vote'].round}",
+                    message=f"msg#{msg['id']}",
+                    signature_time=msg["vote"].issued_at,
+                )
+            if self.model == "B":
+                self.update_polc_gateway()
+
+    def deliver_message(self, mid: int, phase: str = "") -> None:
+        msg = self.messages[mid - 1]
+        if msg["delivered"] or msg["dropped"]:
+            return
+        msg["due"] = self.time
+        self.deliver_due(phase=phase)
+
+    # ---------- model rules ----------
+
+    def update_polc(self, w: Witness) -> None:
+        counts: Dict[Tuple[Any, ...], set] = {}
+        for v in w.volatile.get("observed", []):
+            if v.kind != "prevote":
+                continue
+            k = (v.cp.lock_key(), v.round, v.cp.checkpoint_digest)
+            counts.setdefault(k, set()).add(v.witness)
+        for k, signers in counts.items():
+            if len(signers) >= QC_THRESHOLD and list(k) not in w.volatile["polc"]:
+                w.volatile["polc"].append(list(k))
+                self.log("polc_observed", phase="B", actor=w.wid, detail=f"PoLC round={k[1]} digest={k[2][:8]}")
+
+    def update_polc_gateway(self) -> None:
+        counts: Dict[Tuple[Any, ...], set] = {}
+        for v in self.gateway.observed:
+            if v.kind != "prevote":
+                continue
+            k = (v.cp.lock_key(), v.round, v.cp.checkpoint_digest)
+            counts.setdefault(k, set()).add(v.witness)
+        for k, signers in counts.items():
+            if len(signers) >= QC_THRESHOLD:
+                observed = self.gateway.__dict__.setdefault("polc", [])
+                if list(k) not in [list(x) for x in observed]:
+                    observed.append(list(k))
+
+    def has_polc(self, w: Witness, cp: Checkpoint, round: int) -> bool:
+        return list((cp.lock_key(), round, cp.checkpoint_digest)) in [
+            list(x) for x in w.volatile.get("polc", [])
+        ] or [
+            list(x) for x in w.volatile.get("polc", [])
+        ].count(list((cp.lock_key(), round, cp.checkpoint_digest))) > 0
+
+    def lease_expired_for(self, w: Witness, rec: Dict[str, Any]) -> bool:
+        expires = rec.get("expires_at")
+        return expires is not None and w.now(self.time) > expires + CLOCK_EPSILON
+
+    def conflicting_pending(self, w: Witness, cp: Checkpoint) -> Optional[Tuple[Any, ...]]:
+        for k, rec in w.durable.get("pending", {}).items():
+            if rec["digest"] != cp.checkpoint_digest and k == keystr(cp.lock_key()):
+                if self.model == "C" and self.lease_expired_for(w, rec):
+                    continue
+                return k
+        return None
+
+    def conflicting_commit(self, w: Witness, cp: Checkpoint) -> bool:
+        rec = w.durable.get("committed", {}).get(keystr(cp.lock_key()))
+        return rec is not None and rec != cp.checkpoint_digest
+
+    def same_round_conflict_signed(self, w: Witness, cp: Checkpoint, kind: str, round: int) -> bool:
+        for v in w.signed_votes():
+            if v.kind == kind and v.round == round and v.cp.conflicts(cp):
+                return True
+        return False
+
+    def can_sign(self, w: Witness, cp: Checkpoint, kind: str, round: int) -> Tuple[bool, str]:
+        if not w.honest:
+            return True, "byzantine witness bypasses local safety checks"
+
+        if self.same_round_conflict_signed(w, cp, kind, round):
+            return False, "S1: conflicting vote already signed for same kind/round"
+        if self.conflicting_commit(w, cp):
+            return False, "S2/S5: conflicting checkpoint already committed locally"
+
+        if self.model == "A":
+            if self.conflicting_pending(w, cp) is not None:
+                return False, "pending lock conflict; no automatic release"
+            return True, "permanent-lock rule allows signature"
+
+        if self.model == "UNSAFE":
+            return True, "unsafe timeout policy allows signature after local unlock"
+
+        if self.model == "C":
+            if self.conflicting_pending(w, cp) is not None:
+                return False, "lease still active; pending lock conflict"
+            return True, "lease rule allows signature"
+
+        # Model B: simplified Tendermint-style lock transfer.
+        locked = w.durable.get("locked", {}).get(keystr(cp.lock_key()))
+        if kind == "prevote":
+            if locked and locked["digest"] != cp.checkpoint_digest and round <= locked["round"]:
+                if self.has_polc(w, cp, round):
+                    return True, "higher-round PoLC permits lock transfer"
+                return False, "locked witness cannot prevote conflicting checkpoint without higher-round PoLC"
+            return True, "prevote rule allows signature"
+        if kind == "precommit":
+            if not self.has_polc(w, cp, round):
+                return False, "precommit requires observed PoLC for same checkpoint/round"
+            has_prevote = any(
+                v.kind == "prevote" and v.round == round and v.cp.full_key() == cp.full_key()
+                for v in w.signed_votes()
+            )
+            if not has_prevote:
+                return False, "precommit requires own prevote in same round"
+            return True, "precommit rule allows signature"
+        return False, f"unsupported vote kind for Model B: {kind}"
+
+    # ---------- signing ----------
+
+    def sign_vote(
+        self,
+        wid: str,
+        cp: Checkpoint,
+        kind: str,
+        round: int = 0,
+        *,
+        nonce: Optional[str] = None,
+        lease: Optional[int] = None,
+        force_byzantine_conflict: bool = False,
+        phase: str = "",
+    ) -> Optional[Vote]:
+        w = self.witnesses[wid]
+        allowed, reason = self.can_sign(w, cp, kind, round)
+        if not allowed and not force_byzantine_conflict:
+            self.log("sign_rejected", phase=phase, actor=wid, detail=f"{kind} {cp.checkpoint_digest[:8]} round={round}: {reason}")
+            return None
+        if force_byzantine_conflict and w.honest:
+            raise AssertionError("force_byzantine_conflict requires a Byzantine witness")
+
+        issued = w.now(self.time)
+        expires = issued + (lease if lease is not None else LEASE_DURATION) if self.model == "C" else None
+        vote = Vote(kind=kind, witness=wid, round=round, cp=cp, issued_at=issued, expires_at=expires, nonce=nonce)
+        w.add_vote(vote)
+
+        durable_change = "signed vote appended to durable vote log"
+        if kind in ("candidate", "prevote") and self.model in ("A", "C", "UNSAFE"):
+            w.durable.setdefault("pending", {})[keystr(cp.lock_key())] = {
+                "digest": cp.checkpoint_digest,
+                "round": round,
+                "expires_at": expires,
+            }
+            durable_change = "pending lock written before/at signature"
+        if self.model == "B" and kind == "precommit":
+            w.durable.setdefault("locked", {})[keystr(cp.lock_key())] = {
+                "round": round,
+                "digest": cp.checkpoint_digest,
+            }
+            w.volatile["current_round"] = max(w.volatile.get("current_round", 0), round)
+            durable_change = "lockedQC updated by precommit"
+
+        if force_byzantine_conflict:
+            self.adversarial(f"Byzantine {wid} signed conflicting {kind} digest={cp.checkpoint_digest[:8]} round={round}")
+
+        self.log(
+            "signature_created",
+            phase=phase,
+            actor=wid,
+            detail=f"{kind} digest={cp.checkpoint_digest[:8]} round={round} epoch={cp.epoch} nonce={nonce} reason={reason}",
+            signature_time=issued,
+            durable_change=durable_change,
+        )
+        return vote
+
+    def sign_fc(
+        self,
+        wid: str,
+        cp: Checkpoint,
+        nonce: str,
+        round: int = 0,
+        *,
+        phase: str = "",
+    ) -> Optional[Vote]:
+        w = self.witnesses[wid]
+        if self.conflicting_pending(w, cp) is not None or self.conflicting_commit(w, cp):
+            self.log("fc_sign_rejected", phase=phase, actor=wid, detail="FC request conflicts with locked/committed checkpoint")
+            return None
+        if self.model == "B":
+            for entry in w.volatile.get("polc", []):
+                k = list(entry)
+                if k[0] == cp.lock_key() and k[1] > 0 and k[2] != cp.checkpoint_digest:
+                    self.log("fc_sign_rejected", phase=phase, actor=wid, detail="higher-round PoLC for conflicting checkpoint; FC for stale digest rejected")
+                    return None
+        issued = w.now(self.time)
+        expires = issued + LEASE_DURATION if self.model == "C" else None
+        vote = Vote(kind="fc", witness=wid, round=round, cp=cp, issued_at=issued, expires_at=expires, nonce=nonce)
+        w.add_vote(vote)
+        self.log("fc_signature_created", phase=phase, actor=wid, detail=f"FC digest={cp.checkpoint_digest[:8]} nonce={nonce}", signature_time=issued, durable_change="FC signature appended to durable vote log")
+        return vote
+
+    # ---------- recovery actions ----------
+
+    def timeout_advance(self, wid: str, new_round: int, *, phase: str = "") -> None:
+        w = self.witnesses[wid]
+        if self.model == "B":
+            old_round = w.volatile.get("current_round", 0)
+            w.volatile["current_round"] = max(old_round, new_round)
+            self.log("timeout_round_advance", phase=phase, actor=wid, detail=f"round {old_round} -> {w.volatile['current_round']}; lock unchanged")
+            self.note("Model B: timeout advances the round state machine only; it is not an unlock proof.")
+        elif self.model == "UNSAFE":
+            w.durable.setdefault("pending", {}).clear()
+            self.log("unsafe_timeout_unlock", phase=phase, actor=wid, detail="pending lock cleared solely by local timeout")
+        else:
+            self.log("timeout_no_unlock", phase=phase, actor=wid, detail=f"model {self.model}: local timeout does not release pending lock")
+
+    def learn_commit(self, wid: str, cp: Checkpoint, *, phase: str = "") -> None:
+        w = self.witnesses[wid]
+        w.durable.setdefault("committed", {})[keystr(cp.lock_key())] = cp.checkpoint_digest
+        self.log("commit_evidence_learned", phase=phase, actor=wid, detail=f"checkpoint digest={cp.checkpoint_digest[:8]} recorded as committed", durable_change="committed checkpoint recorded locally")
+
+    def trusted_recovery(self, wid: str, *, phase: str = "") -> None:
+        w = self.witnesses[wid]
+        if self.model == "A":
+            w.durable.setdefault("pending", {}).clear()
+        self.log("trusted_recovery", phase=phase, actor=wid, detail="explicit trusted recovery invoked; no automatic timeout semantics")
+
+    def restart(self, wid: str, mode: str = "full", *, phase: str = "") -> None:
+        w = self.witnesses[wid]
+        floor_before = w.floor()
+        volatile_observed = list(w.volatile.get("observed", []))
+        if mode == "full":
+            w.volatile = {"observed": volatile_observed, "polc": list(w.volatile.get("polc", [])), "current_round": w.volatile.get("current_round", 0)}
+            detail = "full durable state restored"
+        elif mode == "lost_pending":
+            w.durable.setdefault("pending", {})
+            for v in w.signed_votes():
+                if v.kind in ("candidate", "prevote"):
+                    w.durable["pending"].setdefault(
+                        keystr(v.cp.lock_key()),
+                        {"digest": v.cp.checkpoint_digest, "round": v.round, "expires_at": v.expires_at},
+                    )
+            if self.model == "B":
+                for v in w.signed_votes():
+                    if v.kind == "precommit":
+                        w.durable["locked"].setdefault(keystr(v.cp.lock_key()), {"round": v.round, "digest": v.cp.checkpoint_digest})
+            w.volatile = {"observed": volatile_observed, "polc": list(w.volatile.get("polc", [])), "current_round": w.volatile.get("current_round", 0)}
+            detail = "volatile pending lost; reconstructed from durable signed-vote log"
+        elif mode == "lost_all":
+            w.durable = {"signed_votes": [], "pending": {}, "locked": {}, "committed": {}, "current_round": 0}
+            w.volatile = {"observed": [], "polc": [], "current_round": 0}
+            detail = "all local state lost; no protocol can infer forgotten state locally"
+        else:
+            raise ValueError(f"unknown restart mode: {mode}")
+
+        floor_after = w.floor()
+        if w.honest and floor_after < floor_before:
+            self.violation("S5", f"{wid} restart({mode}) rolled signing floor from {floor_before} to {floor_after}")
+        self.log("witness_restart", phase=phase, actor=wid, detail=f"mode={mode}; {detail}; floor {floor_before} -> {floor_after}")
+
+    # ---------- gateway verification ----------
+
+    def lease_valid(self, vote: Vote, now_g: int) -> bool:
+        if self.model != "C" or vote.expires_at is None:
+            return True
+        return now_g + CLOCK_EPSILON >= vote.issued_at and now_g - CLOCK_EPSILON <= vote.expires_at
+
+    def _accepted_kind(self) -> str:
+        return {"A": "candidate", "B": "precommit", "C": "candidate", "UNSAFE": "candidate"}[self.model]
+
+    def submit_qc(self, cp: Checkpoint, round: int, *, votes: Optional[List[Vote]] = None, phase: str = "") -> bool:
+        pool = list(votes) if votes is not None else list(self.gateway.observed)
+        expected = self._accepted_kind()
+        candidates = [v for v in pool if v.kind == expected and v.round == round and v.cp.full_key() == cp.full_key()]
+        wrong_round = [v for v in pool if v.kind == expected and v.cp.full_key() == cp.full_key() and v.round != round]
+        if wrong_round:
+            self.log("old_round_vote_ignored", phase=phase, actor="G", detail=f"{len(wrong_round)} vote(s) from other round excluded from QC")
+
+        for v in candidates:
+            if v.cp.full_key() != cp.full_key():
+                self.violation("S3", "QC vote binding mismatch")
+        if any(v.round != round for v in candidates):
+            self.violation("S4", "old-round signature reinterpreted as current-round QC vote")
+
+        valid = [v for v in candidates if self.lease_valid(v, self.time)]
+        distinct = {v.witness for v in valid}
+        reason = ""
+        if len(candidates) != len(valid):
+            reason = "expired lease vote(s) excluded"
+        if len(distinct) < QC_THRESHOLD:
+            reason = (reason + "; " if reason else "") + f"insufficient valid signatures {len(distinct)}/{QC_THRESHOLD}"
+            self.gateway.decisions.append(f"QC_REJECT digest={cp.checkpoint_digest[:8]} round={round}: {reason}")
+            self.log("qc_rejected", phase=phase, actor="G", detail=reason, gateway_decision=self.gateway.decisions[-1])
+            return False
+
+        lk = keystr(cp.lock_key())
+        committed = self.gateway.committed.get(lk)
+        if committed is not None and committed != cp.checkpoint_digest:
+            self.violation("S2", f"conflicting committed checkpoint {committed[:8]} vs {cp.checkpoint_digest[:8]}")
+            reason = "conflicting checkpoint already committed"
+            self.gateway.decisions.append(f"QC_REJECT digest={cp.checkpoint_digest[:8]} round={round}: {reason}")
+            self.log("qc_rejected", phase=phase, actor="G", detail=reason, gateway_decision=self.gateway.decisions[-1])
+            return False
+
+        self.gateway.committed[lk] = cp.checkpoint_digest
+        record = {"digest": cp.checkpoint_digest, "round": round, "signers": sorted(distinct), "epoch": cp.epoch, "chain_id": cp.chain_id, "witness_set_id": cp.witness_set_id}
+        self.gateway.qc.append(record)
+        decision = f"QC_ACCEPT digest={cp.checkpoint_digest[:8]} round={round} signers={sorted(distinct)}"
+        self.gateway.decisions.append(decision)
+        self.log("qc_accepted", phase=phase, actor="G", detail=json.dumps(record, sort_keys=True), qc_formed=decision, gateway_decision=decision)
+        return True
+
+    def submit_fc(self, cp: Checkpoint, nonce: str, *, votes: Optional[List[Vote]] = None, phase: str = "") -> bool:
+        pool = list(votes) if votes is not None else list(self.gateway.observed)
+        candidates = [v for v in pool if v.kind == "fc" and v.nonce == nonce and v.cp.full_key() == cp.full_key()]
+        for v in candidates:
+            if v.cp.full_key() != cp.full_key() or v.nonce != nonce:
+                self.violation("S3", "FC vote binding mismatch")
+        valid = [v for v in candidates if self.lease_valid(v, self.time)]
+        distinct = {v.witness for v in valid}
+        reason = ""
+        if len(candidates) != len(valid):
+            reason = "expired lease vote(s) excluded"
+        if len(distinct) < FC_THRESHOLD:
+            reason = (reason + "; " if reason else "") + f"insufficient FC signatures {len(distinct)}/{FC_THRESHOLD}"
+            self.gateway.decisions.append(f"FC_REJECT digest={cp.checkpoint_digest[:8]} nonce={nonce}: {reason}")
+            self.log("fc_rejected", phase=phase, actor="G", detail=reason, gateway_decision=self.gateway.decisions[-1])
+            return False
+
+        lk = keystr(cp.lock_key())
+        committed = self.gateway.committed.get(lk)
+        if committed is not None and committed != cp.checkpoint_digest:
+            self.violation("S2", "FC accepted for checkpoint conflicting with committed checkpoint")
+            reason = "conflicting committed checkpoint"
+            self.gateway.decisions.append(f"FC_REJECT digest={cp.checkpoint_digest[:8]} nonce={nonce}: {reason}")
+            self.log("fc_rejected", phase=phase, actor="G", detail=reason, gateway_decision=self.gateway.decisions[-1])
+            return False
+
+        record = {"digest": cp.checkpoint_digest, "nonce": nonce, "signers": sorted(distinct), "epoch": cp.epoch, "chain_id": cp.chain_id, "witness_set_id": cp.witness_set_id}
+        self.gateway.fc.append(record)
+        decision = f"FC_ACCEPT digest={cp.checkpoint_digest[:8]} nonce={nonce} signers={sorted(distinct)}"
+        self.gateway.decisions.append(decision)
+        self.log("fc_accepted", phase=phase, actor="G", detail=json.dumps(record, sort_keys=True), fc_formed=decision, gateway_decision=decision)
+        return True
+
+    # ---------- finalization ----------
+
+    def finalize(self) -> Dict[str, Any]:
+        safety: Dict[str, bool] = {}
+        for i in range(1, 6):
+            code = f"S{i}"
+            safety[code] = not any(v["invariant"] == code for v in self.violations)
+        liveness = {k: bool(v["passed"]) for k, v in self.liveness.items()}
+        for k in ("L1", "L2", "L3", "L4"):
+            liveness.setdefault(k, False)
+        return {
+            "scenario_id": self.scenario_id,
+            "model": self.model,
+            "description": self.description,
+            "seed": self.seed,
+            "initial_state": self.initial_state,
+            "events": self.events,
+            "final_witness_state": self.snapshot(),
+            "gateway_decisions": self.gateway.decisions,
+            "gateway_qc": self.gateway.qc,
+            "gateway_fc": self.gateway.fc,
+            "safety": safety,
+            "liveness": liveness,
+            "liveness_notes": {k: v["note"] for k, v in self.liveness.items()},
+            "violations": self.violations,
+            "adversarial_observations": self.adversarial_observations,
+            "notes": self.notes,
+        }
+
+
+def make_cp(digest: str, *, epoch: int = 1, parent: str = "genesis", set_id: str = "set-v1", chain: str = "chain-main") -> Checkpoint:
+    return Checkpoint(
+        chain_id=chain,
+        witness_set_id=set_id,
+        epoch=epoch,
+        checkpoint_digest=digest,
+        parent_digest=parent,
+    )
+
+
+def write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
