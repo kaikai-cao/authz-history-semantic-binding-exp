@@ -1,15 +1,16 @@
 {
-  "base_commit": "d7ed7970900cff561f927c42ff025ad844eea6f7",
+  "base_commit": "41e1742a85f7de8955a1409e4750fb1e6d85207c",
   "liveness_source": "derived from recorded events and final state; not_applicable when precondition is absent",
   "model_b_lock_transfer": "locked_round < polc_round < current_round; same/lower round PoLC never unlocks",
+  "model_b_round_advance": "current_round only via explicit timeout_advance; can_sign is read-only; vote round must equal current_round",
   "models": [
     "A",
     "B",
     "C"
   ],
   "note": "Safety and liveness are reported separately. Simulator results are not a BFT soundness proof.",
-  "revision": "R1",
-  "scenario_count": 48,
+  "revision": "R1-C1",
+  "scenario_count": 49,
   "seed": 20261124,
   "unsafe_counterexample": "U1-UNSAFE"
 }

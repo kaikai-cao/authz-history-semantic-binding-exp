@@ -30,8 +30,8 @@ REQUIRED_EVENT_FIELDS = {
     "gateway_decision",
     "witness_state",
 }
-# P1-P10 x 3 + CK1-CK7 + U1 + AL1 + FRESH-B + R1-B1..B8
-EXPECTED_COUNT = 30 + 7 + 1 + 1 + 1 + len(R1_B_IDS)
+# P1-P10 x 3 + CK1-CK7 + U1 + AL1 + FRESH-B + R1-B1..B8 + R1-C1-B1
+EXPECTED_COUNT = 30 + 7 + 1 + 1 + 1 + len(R1_B_IDS) + 1
 
 
 def counterexample(result: dict, limit: int = 6) -> str:
@@ -255,12 +255,78 @@ class ProtocolAuditTests(unittest.TestCase):
         self.assertFalse(any(q["digest"].startswith("cccc") for q in result["gateway_qc"]), counterexample(result))
         self.assertTrue(any("R1 finding" in n for n in result["notes"]), counterexample(result))
 
+    # ---------------- R1-C1: explicit round advancement ----------------
+
+    def test_c1_round_advance_constraints(self) -> None:
+        """A-E: sign requests never advance rounds; only explicit events do."""
+        result = self.results["R1-C1-B1-B"]
+        notes = result["notes"]
+
+        def note(label: str) -> str:
+            matches = [n for n in notes if n.startswith(label + ":")]
+            self.assertTrue(matches, f"missing {label} probe\n{counterexample(result)}")
+            return matches[0]
+
+        a = note("R1-C1-A")
+        self.assertIn("expected_allowed=False", a, a)
+        self.assertIn("can_sign=False", a, a)
+        self.assertIn("signature_created=False", a, a)
+        self.assertIn("current_round_before=2", a, a)
+        self.assertIn("current_round_after=2", a, a)
+
+        b = note("R1-C1-B")
+        self.assertIn("expected_allowed=True", b, b)
+        self.assertIn("can_sign=True", b, b)
+        self.assertIn("signature_created=True", b, b)
+        self.assertIn("current_round_after_advance=4", b, b)
+        self.assertIn("current_round_after_sign=4", b, b)
+
+        c = note("R1-C1-C")
+        self.assertIn("expected_allowed=False", c, c)
+        self.assertIn("can_sign=False", c, c)
+        self.assertIn("signature_created=False", c, c)
+        self.assertIn("state_unchanged=True", c, c)
+
+        d = note("R1-C1-D")
+        self.assertIn("can_sign=False", d, d)
+        self.assertIn("state_unchanged=True", d, d)
+        self.assertIn("current_round=4", d, d)
+
+        e = note("R1-C1-E")
+        self.assertIn("expected_allowed=False", e, e)
+        self.assertIn("can_sign=False", e, e)
+        self.assertIn("signature_created=False", e, e)
+        self.assertIn("lock_unchanged=True", e, e)
+        self.assertTrue(all(result["safety"].values()), counterexample(result))
+
+        # Every higher-round signing attempt must be explicitly rejected by
+        # the round gate, not silently accepted through max().
+        rejected = [
+            ev for ev in result["events"]
+            if ev["action"] == "sign_rejected" and "do not advance the round" in ev["detail"]
+        ]
+        self.assertTrue(rejected, "no round-gate rejection event recorded")
+
+    def test_can_sign_source_is_read_only(self) -> None:
+        """Source-level evidence: can_sign never writes current_round; sign_vote does not either for B."""
+        src = (ROOT / "src" / "simulator.py").read_text(encoding="utf-8")
+        start = src.index("    def can_sign(")
+        end = src.index("    # ---------- signing ----------")
+        body = src[start:end]
+        self.assertNotIn('current_round"] =', body, "can_sign mutates current_round")
+        self.assertNotIn('current_round"] =', src[start:src.index("    def sign_fc(")],
+                         "sign_vote path mutates current_round")
+        # The only Model-B write to volatile current_round is timeout_advance.
+        self.assertIn("def timeout_advance(", src)
+        ta = src[src.index("    def timeout_advance("):src.index("    def learn_commit(")]
+        self.assertIn('w.volatile["current_round"] = max(old_round, new_round)', ta)
+
     def test_parse_generated_results(self) -> None:
         path = ROOT / "results" / "p1_p10.json"
         self.assertTrue(path.exists())
         payload = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(len(payload), EXPECTED_COUNT)
-        self.assertEqual(json.loads((ROOT / "results" / "summary.json").read_text(encoding="utf-8"))["revision"], "R1")
+        self.assertEqual(json.loads((ROOT / "results" / "summary.json").read_text(encoding="utf-8"))["revision"], "R1-C1")
 
 
 if __name__ == "__main__":

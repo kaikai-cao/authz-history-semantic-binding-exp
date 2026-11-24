@@ -120,10 +120,49 @@ def extra_table() -> str:
     return "\n".join(lines)
 
 
-TEXT = f"""# EXP-D3-07-B-P1-R1 — Results
+def c1_table() -> str:
+    r = DATA["R1-C1-B1-B"]
+    lines = [
+        "| 子测试 | 场景 | 预期 | can_sign | 产生签名 | 状态不变 | 关键理由 |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    checks = (
+        ("A 未推进拒绝高轮", "R1-C1-A", "False"),
+        ("B 显式推进后允许", "R1-C1-B", "True"),
+        ("C 旧轮次拒绝", "R1-C1-C", "False"),
+        ("D can_sign 纯检查", "R1-C1-D", "False"),
+        ("E timeout 不解锁", "R1-C1-E", "False"),
+    )
+    for label, sid, expected in checks:
+        note = next((n for n in r["notes"] if n.startswith(sid + ":")), "")
+        m = re.search(r"can_sign=(\w+)\s+signature_created=(\w+)", note)
+        can_sign = m.group(1) if m else (re.search(r"can_sign=(\w+)", note).group(1) if re.search(r"can_sign=(\w+)", note) else "?")
+        signed = m.group(2) if m else ("n/a（纯检查）" if sid == "R1-C1-D" else "?")
+        if sid == "R1-C1-D":
+            invariant = re.search(r"state_unchanged=(\w+)", note)
+            unchanged = invariant.group(1) if invariant else "?"
+        elif sid == "R1-C1-E":
+            invariant = re.search(r"lock_unchanged=(\w+)", note)
+            unchanged = invariant.group(1) if invariant else "?"
+        elif sid in ("R1-C1-C",):
+            invariant = re.search(r"state_unchanged=(\w+)", note)
+            unchanged = invariant.group(1) if invariant else "?"
+        else:
+            ir = re.search(r"current_round_(?:before|after_advance)=(\d+)", note)
+            ar = re.search(r"current_round_(?:after|after_sign)=(\d+)", note)
+            unchanged = f"{ir.group(1) if ir else '?'}→{ar.group(1) if ar else '?'}"
+        reason = re.sub(r"^.*?reason=", "", note).strip()
+        lines.append(
+            f"| {label} | {sid} | {expected} | {can_sign} | {signed} | {unchanged} | {reason[:96]} |"
+        )
+    return "\n".join(lines)
+
+
+TEXT = f"""# EXP-D3-07-B-P1-R1-C1 — Results
 
 > 本文件由 `src/report.py` 从 `results/p1_p10.json` 自动生成。R1 修正了 R0 的 Model B 锁转移规则、
-> P2/P3 场景与 Liveness 统计口径。R0 的手写标注仅作对照列保留，不参与 R1 结论。
+> P2/P3 场景与 Liveness 统计口径；R1-C1 进一步要求 current_round 只由显式轮次推进事件更新，
+> 签名请求不得隐式推进轮次。R0/R1 的原有结果列全部保留，不改写历史结果。
 > 修订 `{SUMMARY['revision']}`，场景数 `{SUMMARY['scenario_count']}`，seed `{SUMMARY['seed']}`。
 
 ## 1. 核心答案
@@ -178,6 +217,33 @@ P8-B 的事件证据见 `results/p1_p10.json` 的 `notes`：锁定节点无解�
 
 `预期`/`can_sign`/`产生签名` 均取自真实 `can_sign` → `sign_vote` 路径，不是测试构造器预判；
 所有场景的 `ANOMALY` 标记为空，Safety 均为 `S✓`。
+
+## 4b. R1-C1：显式轮次推进约束
+
+R1 的 `can_sign()` 用 `max(current_round, request_round)` 把签名请求的轮次合并进当前轮次，
+`sign_vote()` 也会在 precommit 时写回 `max(...)`。这意味着 Witness 不必先执行轮次推进，就可能在
+更高轮次签名。R1-C1 消除这两条隐式路径：
+
+- `current_round` 只由 `timeout_advance()` 单调推进，幂等并记录推进前后轮次；
+- `can_sign()` 变为纯检查：Model B 下请求轮次必须严格等于 `current_round`，高轮/低轮一律拒绝，
+  检查前后 `current_round`、durable lock、投票日志完全不变；
+- `sign_vote()` 删除 `max(...)` 写回，只有通过检查后才签名、写锁、追加投票日志；
+- 锁转移三段不等式 `locked_round < polc_round < current_round` 保持不变，且 `can_sign()` 使用的
+  `current_round` 已是 Witness 真实所在轮次，不再由请求参数抬高。
+
+`current_round` 写入位置（源码证据）：Witness 构造初始化 0；`timeout_advance()` 唯一运行时推进点
+（`max(old_round, new_round)`，仅 Model B/UNSAFE 分支）；`restart()` 的 full/lost_pending 保留、
+lost_all 归零。R1-C1 前 `can_sign()`/`sign_vote()` 的 `max(...)` 写回已删除，测试
+`test_can_sign_source_is_read_only` 对源码做静态断言。`_set_lock()` 测试夹具也不再隐式推进轮次。
+
+{c1_table()}
+
+C1 对照：R1 下"未推进轮次请求 round 4"会因 `max(2,4)=4` 满足 `2 < 3 < 4` 而被允许；R1-C1 下
+同一请求在轮次门直接拒绝，`current_round` 保持 2（测试 A）。显式推进到 4 后用同一 PoLC 放行（测试 B）。
+P2-B/P3-B/P8-B 与 R1-B1–B8 的核心结论、事件证据与 Safety 均未改变；新增 1 个场景，场景数由 48 增至 49。
+
+**没有证明什么**：这不是 BFT 形式化安全证明，也不证明 crash-safe 持久化或完整 Tendermint round-change。
+C1 只验证"显式轮次推进是否成为状态机硬约束"以及既有 P1 结论是否改变。
 
 ## 5. 额外边界场景与反例
 

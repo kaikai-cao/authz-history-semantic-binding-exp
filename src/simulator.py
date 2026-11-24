@@ -552,16 +552,26 @@ class Simulator:
                 return False, "lease still active; pending lock conflict"
             return True, "lease rule allows signature"
 
-        # Model B: Tendermint-style lock / PoLC state machine (R1 corrected).
+        # Model B: Tendermint-style lock / PoLC state machine (R1 + C1).
         #
         # Explicit state, never conflated:
-        #   current_round = w.volatile["current_round"] (advanced by timeout only)
+        #   current_round = w.volatile["current_round"] (C1: advanced ONLY by
+        #                   an explicit timeout_advance event, monotonically)
         #   locked_round  = locked["round"]   (durable, set by precommit)
         #   locked_digest = locked["digest"]
         #   polc_round    = the round at which a 3-of-4 prevote set was observed
         #   polc_digest   = digest that the PoLC binds
+        #
+        # C1: a signature request is a read-only check here. It must target the
+        # witness's *current* round exactly; it never advances the round.
         locked = w.durable.get("locked", {}).get(keystr(cp.lock_key()))
-        current_round = max(w.volatile.get("current_round", 0), round)
+        current_round = w.volatile.get("current_round", 0)
+        if round != current_round:
+            direction = "higher" if round > current_round else "lower"
+            return False, (
+                f"{kind} round={round} is a {direction} round than current_round="
+                f"{current_round}; signature requests do not advance the round"
+            )
 
         if kind == "prevote":
             if locked and locked["digest"] != cp.checkpoint_digest:
@@ -633,12 +643,13 @@ class Simulator:
         # recorded, so lock state and vote log cannot disagree, and both are
         # committed before the signature is returned to the caller.  This is
         # simulator state discipline only, not a claim of crash-safe storage.
+        # C1: signing never writes current_round; only timeout_advance does.
+        # can_sign has already rejected any round != current_round for Model B.
         if self.model == "B" and kind == "precommit":
             w.durable.setdefault("locked", {})[keystr(cp.lock_key())] = {
                 "round": round,
                 "digest": cp.checkpoint_digest,
             }
-            w.volatile["current_round"] = max(w.volatile.get("current_round", 0), round)
             durable_change = "lockedQC written before vote-log append for precommit"
         w.add_vote(vote)
 

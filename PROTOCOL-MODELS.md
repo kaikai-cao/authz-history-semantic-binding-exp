@@ -94,9 +94,28 @@ polc[]              # (lock_key, round, digest)，由 >=3 个 prevote 形成
 >
 > 禁止混用 `polc_round` 与 `current_round`。
 
-### 规则（R1）
+> **R1-C1 修正**：R1 的 `can_sign()` 用 `max(current_round, request_round)` 把请求轮次并入当前
+> 轮次，`sign_vote()` 在 precommit 时也会写回 `max(...)`，使 Witness 无需显式推进即可在更高轮次
+> 签名。C1 把轮次推进收紧为状态机硬约束：
+>
+> ```text
+> current_round 只由 timeout_advance() 单调推进（幂等，记录推进前后与触发事件）；
+> can_sign() 为纯检查：Model B 的 prevote/precommit 请求轮次必须严格等于 current_round，
+>              高轮/低轮一律拒绝，检查前后 current_round / durable lock / 投票日志不变；
+> sign_vote() 删除 max(...) 写回，只有检查通过后才签名、写锁、追加投票日志。
+> ```
+>
+> 锁转移条件仍为 `locked_round < polc_round < current_round`，但其中 `current_round` 是 Witness
+> 真实所在轮次，不再由签名请求参数抬高。R1-B1–B8 场景改为用显式 `timeout_advance()` 进入目标轮次，
+> 测试中不再直接赋值 `current_round`（含 `_set_lock()` 夹具也不再隐式推进）。
 
+### 规则（R1-C1）
+
+0. `current_round` 推进：
+   - 唯一入口是明确的 `timeout_advance()`，单调不回退，同轮重复推进幂等；
+   - 签名请求不得推进轮次；`can_sign()` 只读；请求轮次 ≠ 当前轮次时拒绝（R1-C1-A/C/D）。
 1. `prevote`：
+   - 请求轮次必须等于 `current_round`；
    - 无锁或锁的 digest 与提案相同：允许；
    - 已锁定冲突 digest：只有当存在 PoLC 满足
      `locked_round < polc_round < current_round`，且该 PoLC 绑定同一 chain/witness_set/epoch
@@ -104,14 +123,15 @@ polc[]              # (lock_key, round, digest)，由 >=3 个 prevote 形成
    - **仅进入更高轮次不允许改变锁定目标；同轮或低轮 PoLC 不允许解锁**（R1-B1/B2/B4）；
    - 同轮同 Witness 不得对两个冲突 digest prevote（S1）。
 2. `precommit`：
+   - 请求轮次必须等于 `current_round`；
    - 必须观察到**同一轮次、同一 checkpoint** 的精确 PoLC（旧轮 PoLC 不复用，R1-B8）；
    - 若已锁定冲突 digest，还须满足同一严格解锁不等式；
    - 自己必须在该轮次 prevote 过同一 checkpoint；
    - 先写持久化 `locked`，再追加投票日志，两者都在返回签名前完成（仅模拟器状态纪律，
      不声称 crash-safe storage）。
 3. `timeout`：
-   - 只推进 `current_round`；
-   - 不清除 `locked`，不单独构成解锁证明。
+   - 只推进 `current_round`，不清除 `locked`，不单独构成解锁证明（R1-C1-E）；
+   - 推进后若无合格 PoLC，冲突 prevote 仍被拒绝——进入更高轮次不等于解锁。
 4. `PoLC`：
    - 由至少 3 个**不同** Witness 的同轮同 digest prevote 形成；
    - Witness 自己的投票与收到的消息合并统计，按 `(witness, vote.binding())` 去重（R1-B5）；

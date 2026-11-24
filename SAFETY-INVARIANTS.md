@@ -1,6 +1,6 @@
-# SAFETY-INVARIANTS.md（R1）
+# SAFETY-INVARIANTS.md（R1-C1）
 
-Safety 与 Liveness 在本审计中分开统计。fail-closed 拒绝只说明没有接受坏输入，不能自动证明系统能继续推进。R1 进一步把 Liveness 从作者手写改为从事件与最终状态机器推导。
+Safety 与 Liveness 在本审计中分开统计。fail-closed 拒绝只说明没有接受坏输入，不能自动证明系统能继续推进。R1 把 Liveness 从作者手写改为从事件与最终状态机器推导；R1-C1 追加状态机约束：Model B 的 `current_round` 只由显式轮次推进事件更新，签名请求不得隐式推进轮次。
 
 ## 1. Safety
 
@@ -41,6 +41,19 @@ Gateway 在同一 `lock_key` 下接受第二个冲突 digest，记为失败。
 
 - 覆盖：P5/P6/AL1、**R1-B7**（locked_round/locked_digest 完整恢复）；
 - 结果：完整重启与 pending 记录丢失（signed_vote 日志仍在）均通过；AL1 中 pending 与投票日志同时丢失，S5 失败。
+
+### S6 — 轮次只能显式推进（R1-C1 新增，状态机约束）
+
+Model B 的 `current_round` 只能由 `timeout_advance()` 单调推进；签名请求不得抬高轮次。
+`can_sign()` 对 Model B 只读，且要求 prevote/precommit 的请求轮次严格等于 `current_round`。
+
+- 检查方式：源码静态断言（`test_can_sign_source_is_read_only`：`can_sign` 与 `sign_vote` 路径不含
+  `current_round` 写回；唯一运行时写入点为 `timeout_advance` 的 `max(old_round, new_round)`）；
+- 覆盖：**R1-C1-A**（未推进时 round 4 被拒，current_round 保持 2）、
+  **R1-C1-B**（显式推进到 4 后合法转移放行）、**R1-C1-C**（当前 4 请求 round 3 被拒）、
+  **R1-C1-D**（can_sign 重复调用前后状态完全一致）、**R1-C1-E**（timeout 到 4 但无 PoLC，锁不变）；
+- 结果：五项全部通过真实 `can_sign` → `sign_vote` 路径；请求轮次不一致的拒绝事件写入事件日志；
+- 边界：这是模拟器状态机纪律，不是 crash-safe 持久化证明，也不是 BFT 形式化安全证明。
 
 ## 2. Liveness（R1 机器推导）
 

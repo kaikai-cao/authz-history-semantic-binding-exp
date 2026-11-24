@@ -130,7 +130,8 @@ def p1(s: Simulator) -> None:
             _sign(s, "W2", cp_a, round=0, kind="prevote", recipients=ALL, phase="P1"),
         ]
         _deliver(s, mids, phase="P1")
-        s.timeout_advance("W1", 1, phase="P1-recovery")
+        for wid in HONEST:
+            s.timeout_advance(wid, 1, phase="P1-recovery")
         mids = [
             _sign(s, "W1", cp_b, round=1, kind="prevote", recipients=ALL, phase="P1-recovery"),
             _sign(s, "W2", cp_b, round=1, kind="prevote", recipients=ALL, phase="P1-recovery"),
@@ -279,6 +280,7 @@ def p3(s: Simulator) -> None:
         # strictly higher-round conflicting PoLC.  Under the corrected rule
         # this is circular, so no honest witness may prevote cp_new.
         for wid in ("W2", "W3"):
+            s.timeout_advance(wid, 1, phase="P3-observed")
             _sign(s, wid, cp_new, round=1, kind="prevote", recipients=("W1",), phase="P3-observed")
             w = s.witnesses[wid]
             s.note(f"P3-B: {wid} lock={w.durable.get('locked')} cp_new@1 PoLC={s.has_polc(w, cp_new, 1)}")
@@ -344,7 +346,8 @@ def p4(s: Simulator) -> None:
         _deliver(s, mids, phase="P4")
         s.submit_qc(cp_a, 0, phase="P4")
         s.submit_qc(cp_b, 0, phase="P4")
-        s.timeout_advance("W1", 1, phase="P4-recovery")
+        for wid in HONEST:
+            s.timeout_advance(wid, 1, phase="P4-recovery")
         accepted = _precommit_and_qc(s, cp_c, 1, ("W1", "W2", "W3"), phase="P4-recovery")
         _liv(s, accepted, accepted, True, False, {
             "L1": "higher round with an honest quorum resolves the split",
@@ -529,7 +532,8 @@ def p8(s: Simulator) -> None:
         _deliver(s, pre, phase="P8-partition")
         first = s.submit_qc(cp_a, 0, phase="P8-partition")
         second = s.submit_qc(cp_b, 0, phase="P8-partition")
-        s.timeout_advance("W1", 1, phase="P8-heal")
+        for wid in HONEST:
+            s.timeout_advance(wid, 1, phase="P8-heal")
         accepted = _precommit_and_qc(s, cp_c, 1, HONEST, phase="P8-heal")
         _liv(s, accepted, accepted, True, False, {
             "L1": "after partition heals, higher-round honest quorum advances",
@@ -624,6 +628,8 @@ def p10(s: Simulator) -> None:
     s.submit_qc(cp_new, 0, votes=mixed, phase="P10-mixed")
 
     if s.model == "B":
+        for wid in HONEST:
+            s.timeout_advance(wid, 1, phase="P10-rotated")
         rotated = _precommit_and_qc(s, cp_new, 1, HONEST, phase="P10-rotated")
     else:
         mids = [_sign(s, wid, cp_new, round=1, phase="P10-rotated") for wid in HONEST]
@@ -835,13 +841,17 @@ def al1(s: Simulator) -> None:
 
 
 def _set_lock(s: Simulator, wid: str, cp: Any, round: int) -> None:
-    """Install a durable lock directly as scenario initial state."""
+    """Install a durable lock directly as scenario initial state.
+
+    C1: this helper must NOT advance current_round. Scenarios that need the
+    witness to be in a higher round call timeout_advance explicitly, so the
+    round transition is visible in the event log.
+    """
     w = s.witnesses[wid]
     w.durable.setdefault("locked", {})[keystr(cp.lock_key())] = {
         "round": round,
         "digest": cp.checkpoint_digest,
     }
-    w.volatile["current_round"] = max(w.volatile.get("current_round", 0), round)
 
 
 def _set_polc(s: Simulator, wid: str, cp: Any, round: int) -> None:
@@ -889,7 +899,7 @@ def r1_b1(s: Simulator) -> None:
     locked_cp = make_cp("b1lockkk")
     other = make_cp("b1conflict")
     _set_lock(s, "W1", locked_cp, 2)
-    s.witnesses["W1"].volatile["current_round"] = 3
+    s.timeout_advance("W1", 3, phase="R1-B1-advance")
     _r1_probe(s, "W1", other, "prevote", 3, False, "R1-B1")
     _liv(s, False, False, False, True, {"L1": "targeted lock-rule probe, no recovery schedule"})
 
@@ -900,7 +910,7 @@ def r1_b2(s: Simulator) -> None:
     other = make_cp("b2conflict")
     _set_lock(s, "W1", locked_cp, 2)
     _set_polc(s, "W1", other, 2)
-    s.witnesses["W1"].volatile["current_round"] = 3
+    s.timeout_advance("W1", 3, phase="R1-B2-advance")
     _r1_probe(s, "W1", other, "prevote", 3, False, "R1-B2")
     _liv(s, False, False, False, True, {"L1": "same-round PoLC must not unlock"})
 
@@ -911,7 +921,7 @@ def r1_b3(s: Simulator) -> None:
     other = make_cp("b3conflict")
     _set_lock(s, "W1", locked_cp, 2)
     _set_polc(s, "W1", other, 3)
-    s.witnesses["W1"].volatile["current_round"] = 4
+    s.timeout_advance("W1", 4, phase="R1-B3-advance")
     _r1_probe(s, "W1", other, "prevote", 4, True, "R1-B3")
     _liv(s, True, True, True, True, {"L1": "2 < 3 < 4 permits lock transfer"})
 
@@ -922,7 +932,7 @@ def r1_b4(s: Simulator) -> None:
     other = make_cp("b4conflict")
     _set_lock(s, "W1", locked_cp, 2)
     _set_polc(s, "W1", other, 4)
-    s.witnesses["W1"].volatile["current_round"] = 4
+    s.timeout_advance("W1", 4, phase="R1-B4-advance")
     _r1_probe(s, "W1", other, "prevote", 4, False, "R1-B4")
     _liv(s, False, False, False, True, {"L1": "polc_round == current_round must not unlock"})
 
@@ -953,7 +963,7 @@ def r1_b6(s: Simulator) -> None:
     cp_a = make_cp("b6aaa")
     cp_b = make_cp("b6bbb")
     _set_lock(s, "W1", cp_a, 2)
-    s.witnesses["W1"].volatile["current_round"] = 3
+    s.timeout_advance("W1", 3, phase="R1-B6-advance")
     s.mark_byzantine("W4", phase="R1-B6")
     b1 = s.sign_vote("W4", cp_a, "prevote", 3, force_byzantine_conflict=True, phase="R1-B6")
     b2 = s.sign_vote("W4", cp_b, "prevote", 3, force_byzantine_conflict=True, phase="R1-B6")
@@ -968,7 +978,7 @@ def r1_b7(s: Simulator) -> None:
     locked_cp = make_cp("b7lockkk")
     other = make_cp("b7conflict")
     _set_lock(s, "W1", locked_cp, 2)
-    s.witnesses["W1"].volatile["current_round"] = 3
+    s.timeout_advance("W1", 3, phase="R1-B7-advance")
     s.restart("W1", "full", phase="R1-B7")
     _r1_probe(s, "W1", other, "prevote", 3, False, "R1-B7")
     _liv(s, False, False, False, True, {"L1": "durable lock survives a full restart"})
@@ -978,7 +988,7 @@ def r1_b8(s: Simulator) -> None:
     """An old-round PoLC cannot be reused as a new-round PoLC."""
     cp = make_cp("b8reuse")
     _set_polc(s, "W1", cp, 1)
-    s.witnesses["W1"].volatile["current_round"] = 2
+    s.timeout_advance("W1", 2, phase="R1-B8-advance")
     allowed, reason = s.can_sign(s.witnesses["W1"], cp, "precommit", 2)
     vote = s.sign_vote("W1", cp, "precommit", 2, phase="R1-B8")
     s.note(
@@ -998,6 +1008,7 @@ def fresh_b(s: Simulator) -> None:
     # Honest witnesses are locked on cp_old; a conflicting cp_new prevote
     # cannot be produced without a qualifying PoLC (verified in P3-B/R1-B1).
     for wid in HONEST:
+        s.timeout_advance(wid, 1, phase="FRESH-observe")
         _sign(s, wid, cp_new, round=1, kind="prevote", recipients=("G",), phase="FRESH-observe")
     s.note(
         "FRESH-B layers: (1) gateway committed QC="
@@ -1018,6 +1029,99 @@ def fresh_b(s: Simulator) -> None:
         "L2": "no incomplete conflicting candidate formed by honest witnesses",
         "L3": "three honest witnesses formed the QC",
         "L4": "no administrator or clock; latestness is still external",
+    })
+
+
+# ---------------- R1-C1: explicit Model B round advancement ----------------
+
+
+def _state_fingerprint(w: Any) -> Tuple[Any, ...]:
+    """Read-only fingerprint used to prove can_sign has no side effects."""
+    return (
+        w.volatile.get("current_round", 0),
+        repr(w.durable.get("locked", {})),
+        repr(w.durable.get("pending", {})),
+        tuple(
+            (v.kind, v.witness, v.round, v.cp.checkpoint_digest, v.nonce)
+            for v in w.signed_votes()
+        ),
+    )
+
+
+def r1_c1_b1(s: Simulator) -> None:
+    """C1 A-E: current_round advances only via explicit events, never by signing."""
+    lock_a = make_cp("c1lockaa")
+    conflict = make_cp("c1conflict")
+
+    # --- Test A: round 4 request while current_round is 2 -> reject; no advance.
+    _set_lock(s, "W1", lock_a, 2)
+    s.timeout_advance("W1", 2, phase="R1-C1-A-advance")
+    _set_polc(s, "W1", conflict, 3)
+    w1 = s.witnesses["W1"]
+    round_a_before = w1.volatile.get("current_round")
+    allowed_a, reason_a = s.can_sign(w1, conflict, "prevote", 4)
+    vote_a = s.sign_vote("W1", conflict, "prevote", 4, phase="R1-C1-A")
+    round_a_after = w1.volatile.get("current_round")
+    s.note(
+        f"R1-C1-A: expected_allowed=False can_sign={allowed_a} signature_created={vote_a is not None} "
+        f"current_round_before={round_a_before} current_round_after={round_a_after} reason={reason_a}"
+    )
+
+    # --- Test B: explicit advance to 4, then lawful transfer (2 < 3 < 4).
+    _set_lock(s, "W2", lock_a, 2)
+    s.timeout_advance("W2", 2, phase="R1-C1-B-advance2")
+    _set_polc(s, "W2", conflict, 3)
+    s.timeout_advance("W2", 4, phase="R1-C1-B-advance4")
+    w2 = s.witnesses["W2"]
+    round_b_after_advance = w2.volatile.get("current_round")
+    allowed_b, reason_b = s.can_sign(w2, conflict, "prevote", 4)
+    vote_b = s.sign_vote("W2", conflict, "prevote", 4, phase="R1-C1-B")
+    round_b_after_sign = w2.volatile.get("current_round")
+    s.note(
+        f"R1-C1-B: expected_allowed=True can_sign={allowed_b} signature_created={vote_b is not None} "
+        f"current_round_after_advance={round_b_after_advance} current_round_after_sign={round_b_after_sign} "
+        f"reason={reason_b}"
+    )
+
+    # --- Test C: current_round 4, request old round 3 -> reject.
+    s.timeout_advance("W3", 4, phase="R1-C1-C-advance")
+    w3 = s.witnesses["W3"]
+    before_c = _state_fingerprint(w3)
+    allowed_c, reason_c = s.can_sign(w3, conflict, "prevote", 3)
+    vote_c = s.sign_vote("W3", conflict, "prevote", 3, phase="R1-C1-C")
+    after_c = _state_fingerprint(w3)
+    s.note(
+        f"R1-C1-C: expected_allowed=False can_sign={allowed_c} signature_created={vote_c is not None} "
+        f"state_unchanged={before_c == after_c} reason={reason_c}"
+    )
+
+    # --- Test D: can_sign is a pure check on a higher-round request.
+    before_d = _state_fingerprint(w3)
+    for _ in range(2):
+        d_allowed, d_reason = s.can_sign(w3, conflict, "prevote", 6)
+    after_d = _state_fingerprint(w3)
+    s.note(
+        f"R1-C1-D: can_sign={d_allowed} state_unchanged={before_d == after_d} "
+        f"current_round={w3.volatile.get('current_round')} reason={d_reason}"
+    )
+
+    # --- Test E: timeout advances the round but never unlocks a durable lock.
+    _set_lock(s, "W4", lock_a, 2)
+    s.timeout_advance("W4", 4, phase="R1-C1-E-advance")
+    w4 = s.witnesses["W4"]
+    lock_before_e = repr(w4.durable.get("locked", {}))
+    allowed_e, reason_e = s.can_sign(w4, conflict, "prevote", 4)
+    vote_e = s.sign_vote("W4", conflict, "prevote", 4, phase="R1-C1-E")
+    lock_after_e = repr(w4.durable.get("locked", {}))
+    s.note(
+        f"R1-C1-E: expected_allowed=False can_sign={allowed_e} signature_created={vote_e is not None} "
+        f"lock_unchanged={lock_before_e == lock_after_e} current_round={w4.volatile.get('current_round')} "
+        f"reason={reason_e}"
+    )
+
+    _liv(s, False, False, False, True, {
+        "L1": "targeted state-machine probe; no recovery schedule claimed",
+        "L4": "explicit advancement is an event-machine rule, not an external trusted clock",
     })
 
 
@@ -1054,6 +1158,7 @@ for _sid, _fn in (
     ("R1-B8", r1_b8),
 ):
     SCENARIOS[("B", _sid)] = _fn
+SCENARIOS[("B", "R1-C1-B1")] = r1_c1_b1
 
 DESCRIPTIONS = {
     "P1": "two witnesses lock a candidate, but only two signatures exist",
@@ -1084,6 +1189,7 @@ DESCRIPTIONS = {
     "R1-B6": "Byzantine double-sign does not relax an honest lock",
     "R1-B7": "full restart restores locked round and digest",
     "R1-B8": "old-round PoLC cannot be reused for a new-round precommit",
+    "R1-C1-B1": "explicit round advancement required; signature requests never advance rounds",
 }
 
 
@@ -1101,13 +1207,14 @@ def main() -> None:
     out = Path(__file__).resolve().parent.parent / "results"
     write_json(out / "p1_p10.json", results)
     summary = {
-        "revision": "R1",
-        "base_commit": "d7ed7970900cff561f927c42ff025ad844eea6f7",
+        "revision": "R1-C1",
+        "base_commit": "41e1742a85f7de8955a1409e4750fb1e6d85207c",
         "seed": 20261124,
         "scenario_count": len(results),
         "models": ["A", "B", "C"],
         "unsafe_counterexample": "U1-UNSAFE",
         "model_b_lock_transfer": "locked_round < polc_round < current_round; same/lower round PoLC never unlocks",
+        "model_b_round_advance": "current_round only via explicit timeout_advance; can_sign is read-only; vote round must equal current_round",
         "liveness_source": "derived from recorded events and final state; not_applicable when precondition is absent",
         "note": "Safety and liveness are reported separately. Simulator results are not a BFT soundness proof.",
     }

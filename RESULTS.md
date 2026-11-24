@@ -1,8 +1,9 @@
-# EXP-D3-07-B-P1-R1 — Results
+# EXP-D3-07-B-P1-R1-C1 — Results
 
 > 本文件由 `src/report.py` 从 `results/p1_p10.json` 自动生成。R1 修正了 R0 的 Model B 锁转移规则、
-> P2/P3 场景与 Liveness 统计口径。R0 的手写标注仅作对照列保留，不参与 R1 结论。
-> 修订 `R1`，场景数 `48`，seed `20261124`。
+> P2/P3 场景与 Liveness 统计口径；R1-C1 进一步要求 current_round 只由显式轮次推进事件更新，
+> 签名请求不得隐式推进轮次。R0/R1 的原有结果列全部保留，不改写历史结果。
+> 修订 `R1-C1`，场景数 `49`，seed `20261124`。
 
 ## 1. 核心答案
 
@@ -49,7 +50,7 @@
 | P7 | S✓ L=AANA accept=QC_ACCEPT | S✓ L=AANA accept=QC_ACCEPT | S✓ L=AANN accept=QC_ACCEPT |
 | P8 | S✓ L=XNNX accept=none | S✓ L=NNNX accept=none | S✓ L=AAAN accept=QC_ACCEPT |
 | P9 | S✓ L=AXAA accept=QC_ACCEPT | S✓ L=AXAA accept=QC_ACCEPT | S✓ L=AXAN accept=QC_ACCEPT |
-| P10 | S✓ L=AXXA accept=QC_ACCEPT,QC_ACCEPT | S✓ L=AXXA accept=QC_ACCEPT,QC_ACCEPT | S✓ L=AXXN accept=QC_ACCEPT,QC_ACCEPT |
+| P10 | S✓ L=AXXA accept=QC_ACCEPT,QC_ACCEPT | S✓ L=AXXN accept=QC_ACCEPT,QC_ACCEPT | S✓ L=AXXN accept=QC_ACCEPT,QC_ACCEPT |
 
 R0/R1 对比（仅 B 模型，L 列为各自口径）：
 
@@ -64,7 +65,7 @@ R0/R1 对比（仅 B 模型，L 列为各自口径）：
 | P7-B | 1110 | AANA | 1 | Liveness 口径改为机器推导，安全结论保持 |
 | P8-B | 0010 | NNNX | 0 | R0 声称 heal 后可恢复；R1 显示锁定节点无解锁证据时不可达 |
 | P9-B | 1110 | AXAA | 1 | Liveness 口径改为机器推导，安全结论保持 |
-| P10-B | 1111 | AXXA | 2 | Liveness 口径改为机器推导，安全结论保持 |
+| P10-B | 1111 | AXXN | 2 | Liveness 口径改为机器推导，安全结论保持 |
 
 P2-B 的事件证据：W2/W3 各自观察到 `['W1','W2','W3']` 三份 prevote 并形成 PoLC，
 W1 只观察到自身；Gateway 收到 `['W2','W3','W4']` 三份 precommit 并形成 QC。
@@ -88,6 +89,39 @@ P8-B 的事件证据见 `results/p1_p10.json` 的 `notes`：锁定节点无解�
 `预期`/`can_sign`/`产生签名` 均取自真实 `can_sign` → `sign_vote` 路径，不是测试构造器预判；
 所有场景的 `ANOMALY` 标记为空，Safety 均为 `S✓`。
 
+## 4b. R1-C1：显式轮次推进约束
+
+R1 的 `can_sign()` 用 `max(current_round, request_round)` 把签名请求的轮次合并进当前轮次，
+`sign_vote()` 也会在 precommit 时写回 `max(...)`。这意味着 Witness 不必先执行轮次推进，就可能在
+更高轮次签名。R1-C1 消除这两条隐式路径：
+
+- `current_round` 只由 `timeout_advance()` 单调推进，幂等并记录推进前后轮次；
+- `can_sign()` 变为纯检查：Model B 下请求轮次必须严格等于 `current_round`，高轮/低轮一律拒绝，
+  检查前后 `current_round`、durable lock、投票日志完全不变；
+- `sign_vote()` 删除 `max(...)` 写回，只有通过检查后才签名、写锁、追加投票日志；
+- 锁转移三段不等式 `locked_round < polc_round < current_round` 保持不变，且 `can_sign()` 使用的
+  `current_round` 已是 Witness 真实所在轮次，不再由请求参数抬高。
+
+`current_round` 写入位置（源码证据）：Witness 构造初始化 0；`timeout_advance()` 唯一运行时推进点
+（`max(old_round, new_round)`，仅 Model B/UNSAFE 分支）；`restart()` 的 full/lost_pending 保留、
+lost_all 归零。R1-C1 前 `can_sign()`/`sign_vote()` 的 `max(...)` 写回已删除，测试
+`test_can_sign_source_is_read_only` 对源码做静态断言。`_set_lock()` 测试夹具也不再隐式推进轮次。
+
+| 子测试 | 场景 | 预期 | can_sign | 产生签名 | 状态不变 | 关键理由 |
+| --- | --- | --- | --- | --- | --- | --- |
+| A 未推进拒绝高轮 | R1-C1-A | False | False | False | 2→2 | prevote round=4 is a higher round than current_round=2; signature requests do not advance the ro |
+| B 显式推进后允许 | R1-C1-B | True | True | True | 4→4 | lock transfer allowed by PoLC round 3: 2 < 3 < 4, digest=c1confli |
+| C 旧轮次拒绝 | R1-C1-C | False | False | False | True | prevote round=3 is a lower round than current_round=4; signature requests do not advance the rou |
+| D can_sign 纯检查 | R1-C1-D | False | False | n/a（纯检查） | True | prevote round=6 is a higher round than current_round=4; signature requests do not advance the ro |
+| E timeout 不解锁 | R1-C1-E | False | False | False | True | locked at round 2 for different digest; conflicting prevote needs locked_round < polc_round < cu |
+
+C1 对照：R1 下"未推进轮次请求 round 4"会因 `max(2,4)=4` 满足 `2 < 3 < 4` 而被允许；R1-C1 下
+同一请求在轮次门直接拒绝，`current_round` 保持 2（测试 A）。显式推进到 4 后用同一 PoLC 放行（测试 B）。
+P2-B/P3-B/P8-B 与 R1-B1–B8 的核心结论、事件证据与 Safety 均未改变；新增 1 个场景，场景数由 48 增至 49。
+
+**没有证明什么**：这不是 BFT 形式化安全证明，也不证明 crash-safe 持久化或完整 Tendermint round-change。
+C1 只验证"显式轮次推进是否成为状态机硬约束"以及既有 P1 结论是否改变。
+
 ## 5. 额外边界场景与反例
 
 | 场景 | Safety | Liveness | Gateway 决策 | 结论标签 |
@@ -101,7 +135,7 @@ P8-B 的事件证据见 `results/p1_p10.json` 的 `notes`：锁定节点无解�
 | CK5-C | S✓ | AXXN | QC_ACCEPT digest=lease555 round=1 signers=['W1', 'W2', 'W3'] | 已由模拟器验证：旧轮签名不混入新轮 |
 | CK6-C | S✓ | AXXN | QC_ACCEPT digest=lease666 round=0 signers=['W1', 'W2', 'W3']<br>QC_REJECT digest=lease666 round=0: expired lease vote(s) excluded; insufficient valid signatures 0/3 | 已由模拟器验证：旧 QC 过期后重放被拒 |
 | CK7-C | S✓ | AXXN | QC_REJECT digest=lease777 round=0: expired lease vote(s) excluded; insufficient valid signatures 0/3<br>QC_ACCEPT digest=lease777 round=0 signers=['W1', 'W2', 'W3'] | 已由模拟器验证：Gateway 时钟回拨重新接受旧 QC |
-| FRESH-B-B | S✓ | AXXA | QC_ACCEPT digest=freshhol round=0 signers=['W1', 'W2', 'W3'] | 由协议规则推导 + 模拟器验证：QC 不等于全局最新 |
+| FRESH-B-B | S✓ | AXXN | QC_ACCEPT digest=freshhol round=0 signers=['W1', 'W2', 'W3'] | 由协议规则推导 + 模拟器验证：QC 不等于全局最新 |
 
 必须保留的反例：
 
