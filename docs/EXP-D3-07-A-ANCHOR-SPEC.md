@@ -44,14 +44,28 @@ Any key-field modification changes this digest and invalidates the QC.
 
 `policy_hex` is `encode_field_i(policy_id())` in lowercase hex. `version_decimal` is `transition_version()`. The parser requires the exact prefix, exactly one final separator, a canonical Pallas field hex, and a `u32` version.
 
+`log_root` and `log_size` are mandatory, not advisory: `verify_anchor` rejects `log_root != "NO_LOG"` with `UnsupportedLogRoot` and `log_size != 0` with `NonZeroLogSize`. `chain_id` and `witness_set_root` must match the trusted config, as specified below.
+
 ## 4. Witness QC rules
 
 Trusted config supplies:
 
 - `set_id`;
 - `chain_id`;
-- threshold (3 in the D1 profile);
-- witness IDs and Ed25519 public keys.
+- threshold, fixed at 3 by the mandatory D1 profile;
+- exactly four `(witness_id, Ed25519 public key)` records.
+
+### 4.1 Trusted config validation (R1)
+
+`verify_anchor` calls `validate_witness_set_config` before interpreting any envelope or QC field. It rejects:
+
+- `threshold != 3`;
+- witness count other than 4;
+- empty `set_id`, `chain_id`, or witness ID;
+- repeated `witness_id` or repeated public key;
+- a public key that is not lowercase 64-hex, cannot decode to 32 bytes, or cannot decompress as an Ed25519 point.
+
+The corresponding errors are `InvalidThreshold`, `InvalidWitnessCount`, `EmptyConfigField`, `ConfigDuplicateWitnessId`, `ConfigDuplicatePublicKey`, and `InvalidConfigPublicKey`. No QC signature is counted before this check succeeds, so `threshold = 0` or `1` cannot turn an unsigned QC into an accepted anchor. The 3-of-4 profile is mandatory configuration, not a caller-tunable threshold.
 
 The verifier requires:
 
@@ -117,4 +131,5 @@ Failure at any step prevents step 4. `C_next` is not treated as a newly certifie
 - no RFC6962 inclusion/consistency in this profile;
 - no external latest-checkpoint query;
 - no global freshness from time window or local sequence;
-- no production key management or rotation protocol.
+- no configurable signing threshold or witness-set rotation protocol;
+- no production key management.

@@ -128,6 +128,22 @@ pub struct AnchorStateStore {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AnchorVerificationError {
     InvalidHex(&'static str),
+    /// Trusted config is not the mandatory D1 3-of-4 profile.
+    InvalidThreshold {
+        got: usize,
+        expected: usize,
+    },
+    InvalidWitnessCount {
+        got: usize,
+        expected: usize,
+    },
+    EmptyConfigField(&'static str),
+    ConfigDuplicateWitnessId(String),
+    ConfigDuplicatePublicKey(String),
+    InvalidConfigPublicKey(String),
+    /// Anchor envelope fields outside the declared D3 profile.
+    UnsupportedLogRoot(String),
+    NonZeroLogSize(i64),
     CheckpointDigestMismatch,
     QcCheckpointHashMismatch,
     QcEpochMismatch,

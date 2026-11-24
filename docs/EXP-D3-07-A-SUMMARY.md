@@ -16,6 +16,8 @@ It cannot prove:
 
 > S0 is the current latest authorization state.
 
+An R1 revision subsequently closed a configuration gap: the D1 3-of-4 witness profile is now enforced inside `verify_anchor` before any QC field is interpreted, and the `NO_LOG` / `log_size = 0` anchor profile is explicit. No Halo2 circuit, public instance, or frozen implementation was changed by R1.
+
 ## 2. Added files
 
 ```text
@@ -40,7 +42,7 @@ Modified for integration only:
 - `Cargo.toml` / `Cargo.lock`: add `ed25519-dalek = 2.1.1`;
 - `src/lib.rs`: one `pub mod anchor;` registration.
 
-No Halo2 circuit, witness builder, frozen test or historical document was modified.
+No Halo2 circuit, witness builder, frozen test or historical document was modified. R1 touched only `src/anchor/types.rs`, `src/anchor/verifier.rs`, `tests/d3_07_a_anchor.rs`, and the three R1-updated documents (`ANCHOR-SPEC`, `SECURITY-TESTS`, `SUMMARY`).
 
 ## 3. D1 reuse decisions
 
@@ -59,6 +61,8 @@ The verifier does not check witness persistent locks. D1 E7 remains the authorit
 
 `verify_anchor` performs:
 
+- trusted-config validation before QC parsing: `threshold = 3`, exactly four witnesses, non-empty IDs, no duplicate `witness_id` or public key, and parseable Ed25519 public keys;
+- mandatory anchor profile checks: `log_root == "NO_LOG"` and `log_size == 0`;
 - canonical field validation;
 - checkpoint digest / QC hash / epoch / previous-hash checks;
 - chain ID and witness-set ID checks;
@@ -81,17 +85,18 @@ The verifier does not check witness persistent locks. D1 E7 remains the authorit
 
 ## 5. Test evidence
 
-A01–A28 all passed:
+A01–A36 all passed:
 
 - A01–A07: QC security;
 - A08–A12: D3 instance binding;
 - A13–A17: time policy and anti-rollback verification;
 - A18–A21: durable commit, restart and concurrent commit behavior;
-- A22–A28: combined verification, including proof-failure no-commit checks.
+- A22–A28: combined verification, including proof-failure no-commit checks;
+- A29–A36: trusted-config and anchor-profile fail-closed checks, including a zero-signature QC with `threshold = 0`.
 
-Negative cases enter the actual verifier/binding/combined path. A09–A12 are re-signed so the QC path succeeds and the intended binding check rejects them.
+Negative cases enter the actual verifier/binding/combined path. A09–A12 and A35/A36 are re-signed so the QC path succeeds and the intended binding/profile check rejects them; A29/A30 clear the QC signatures but are rejected by config validation first.
 
-Full `cargo test --release` result: **373 passed / 0 failed / 3 ignored**. `cargo fmt --all -- --check` and `git diff --check` both pass.
+Full `cargo test --release` result after R1: **374 passed / 0 failed / 3 ignored**. `cargo fmt --all -- --check` and `git diff --check` both pass.
 
 ## 6. Cost summary
 
@@ -122,6 +127,7 @@ No external network query was performed and no portable RSS measurement was avai
 - Quorum re-signing old content cannot be unconditionally detected.
 - Time validity is not global freshness.
 - `C_next` is not treated as a newly certified checkpoint.
+- Trusted config provisioning is external; R1 only enforces its fixed D1 3-of-4 shape and cannot authenticate the config source itself.
 
 ## 8. BLOCKED items
 

@@ -12,6 +12,65 @@ use crate::transition::{decode_field_i, policy_id, transition_version, PALLAS_P_
 
 const POLICY_VERSION_PREFIX: &str = "d3-transition-v1";
 
+/// The D1 profile is mandatory, not a caller-selected policy.
+const D1_WITNESS_COUNT: usize = 4;
+const D1_THRESHOLD: usize = 3;
+const NO_LOG_ROOT: &str = "NO_LOG";
+
+/// Fail-closed validation of the trusted witness configuration.
+///
+/// This is deliberately executed inside `verify_anchor`, before any envelope
+/// or QC field is interpreted, so a misconfigured verifier cannot turn a
+/// zero-signature QC into an accepted anchor.
+pub fn validate_witness_set_config(
+    config: &WitnessSetConfig,
+) -> Result<(), AnchorVerificationError> {
+    use AnchorVerificationError::*;
+
+    if config.set_id.is_empty() {
+        return Err(EmptyConfigField("set_id"));
+    }
+    if config.chain_id.is_empty() {
+        return Err(EmptyConfigField("chain_id"));
+    }
+    if config.threshold != D1_THRESHOLD {
+        return Err(InvalidThreshold {
+            got: config.threshold,
+            expected: D1_THRESHOLD,
+        });
+    }
+    if config.witnesses.len() != D1_WITNESS_COUNT {
+        return Err(InvalidWitnessCount {
+            got: config.witnesses.len(),
+            expected: D1_WITNESS_COUNT,
+        });
+    }
+
+    let mut witness_ids = std::collections::BTreeSet::new();
+    let mut public_keys = std::collections::BTreeSet::new();
+    for record in &config.witnesses {
+        if record.witness_id.is_empty() {
+            return Err(EmptyConfigField("witness_id"));
+        }
+        if !witness_ids.insert(record.witness_id.clone()) {
+            return Err(ConfigDuplicateWitnessId(record.witness_id.clone()));
+        }
+        if !is_lower_hex(&record.public_key_hex, 64) {
+            return Err(InvalidConfigPublicKey(record.witness_id.clone()));
+        }
+        if !public_keys.insert(record.public_key_hex.clone()) {
+            return Err(ConfigDuplicatePublicKey(record.witness_id.clone()));
+        }
+        let bytes: [u8; 32] = hex::decode(&record.public_key_hex)
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| InvalidConfigPublicKey(record.witness_id.clone()))?;
+        VerifyingKey::from_bytes(&bytes)
+            .map_err(|_| InvalidConfigPublicKey(record.witness_id.clone()))?;
+    }
+    Ok(())
+}
+
 fn is_lower_hex(value: &str, len: usize) -> bool {
     value.len() == len
         && value.bytes().all(|b| b.is_ascii_hexdigit())
@@ -96,9 +155,19 @@ pub fn verify_anchor(
 ) -> Result<VerifiedAnchor, AnchorVerificationError> {
     use AnchorVerificationError::*;
 
+    // Mandatory D1 profile: reject a bad trusted config before inspecting QC.
+    validate_witness_set_config(config)?;
+
     let cp = &envelope.checkpoint;
     let qc = &envelope.qc;
 
+    // Mandatory anchor profile: no transparency-log claim in this stage.
+    if cp.log_root != NO_LOG_ROOT {
+        return Err(UnsupportedLogRoot(cp.log_root.clone()));
+    }
+    if cp.log_size != 0 {
+        return Err(NonZeroLogSize(cp.log_size));
+    }
     if !is_lower_hex(&cp.state_root, 64) {
         return Err(InvalidHex("checkpoint.state_root"));
     }

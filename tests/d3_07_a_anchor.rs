@@ -1,4 +1,4 @@
-//! EXP-D3-07-A — A01–A28 host-side anchor / freshness / combined tests.
+//! EXP-D3-07-A — A01–A36 host-side anchor / freshness / combined tests.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -602,4 +602,123 @@ fn a22_a28_combined_verification() {
     .is_err());
     assert_eq!(s.load().unwrap().highest_sequence, -1);
     assert_eq!(s.load().unwrap().highest_digest, genesis());
+}
+
+#[test]
+fn a29_a36_config_and_profile_fail_closed() {
+    let w = gg_witness();
+    let inst = instances_c(&w);
+    let cp = checkpoint(&inst);
+    let cfg = config();
+    let pol = policy();
+    let s = store("a29-a36");
+
+    // Positive control: the untouched 3-of-4 config/profile is accepted.
+    assert!(verify_anchor(&envelope_for(&cp), &cfg, &pol, &s, NOW).is_ok());
+
+    // A29: threshold=0 with an empty QC must be rejected by config validation,
+    // not counted as a valid zero-signature quorum.
+    let bad_cfg = WitnessSetConfig {
+        threshold: 0,
+        ..cfg.clone()
+    };
+    let mut env = envelope_for(&cp);
+    env.qc.signatures.clear();
+    expect_error(verify_anchor(&env, &bad_cfg, &pol, &s, NOW), "A29", |e| {
+        matches!(
+            e,
+            AnchorVerificationError::InvalidThreshold {
+                got: 0,
+                expected: 3
+            }
+        )
+    });
+
+    // A30: threshold=1 is outside the mandatory D1 profile.
+    let bad_cfg = WitnessSetConfig {
+        threshold: 1,
+        ..cfg.clone()
+    };
+    expect_error(
+        verify_anchor(&envelope_for(&cp), &bad_cfg, &pol, &s, NOW),
+        "A30",
+        |e| {
+            matches!(
+                e,
+                AnchorVerificationError::InvalidThreshold {
+                    got: 1,
+                    expected: 3
+                }
+            )
+        },
+    );
+
+    // A31: wrong witness count.
+    let mut bad_cfg = cfg.clone();
+    bad_cfg.witnesses.pop();
+    expect_error(
+        verify_anchor(&envelope_for(&cp), &bad_cfg, &pol, &s, NOW),
+        "A31",
+        |e| {
+            matches!(
+                e,
+                AnchorVerificationError::InvalidWitnessCount {
+                    got: 3,
+                    expected: 4
+                }
+            )
+        },
+    );
+
+    // A32: repeated witness_id in trusted config.
+    let mut bad_cfg = cfg.clone();
+    bad_cfg.witnesses[1].witness_id = bad_cfg.witnesses[0].witness_id.clone();
+    expect_error(
+        verify_anchor(&envelope_for(&cp), &bad_cfg, &pol, &s, NOW),
+        "A32",
+        |e| matches!(e, AnchorVerificationError::ConfigDuplicateWitnessId(id) if id == "w0"),
+    );
+
+    // A33: repeated public key in trusted config.
+    let mut bad_cfg = cfg.clone();
+    bad_cfg.witnesses[1].public_key_hex = bad_cfg.witnesses[0].public_key_hex.clone();
+    expect_error(
+        verify_anchor(&envelope_for(&cp), &bad_cfg, &pol, &s, NOW),
+        "A33",
+        |e| matches!(e, AnchorVerificationError::ConfigDuplicatePublicKey(id) if id == "w1"),
+    );
+
+    // A34: invalid-length and unparsable Ed25519 public keys in trusted config.
+    let mut bad_cfg = cfg.clone();
+    bad_cfg.witnesses[0].public_key_hex = "00".repeat(31);
+    expect_error(
+        verify_anchor(&envelope_for(&cp), &bad_cfg, &pol, &s, NOW),
+        "A34-length",
+        |e| matches!(e, AnchorVerificationError::InvalidConfigPublicKey(id) if id == "w0"),
+    );
+    let mut bad_cfg = cfg.clone();
+    // y=2 has no x on Edwards25519, so decompression must fail.
+    bad_cfg.witnesses[1].public_key_hex = format!("02{}", "00".repeat(31));
+    expect_error(
+        verify_anchor(&envelope_for(&cp), &bad_cfg, &pol, &s, NOW),
+        "A34-unparsable",
+        |e| matches!(e, AnchorVerificationError::InvalidConfigPublicKey(id) if id == "w1"),
+    );
+
+    // A35/A36: profile fields must be checked even with a valid re-signed QC.
+    let mut cp_bad = cp.clone();
+    cp_bad.log_root = "LOG-TREE".into();
+    expect_error(
+        verify_anchor(&envelope_for(&cp_bad), &cfg, &pol, &s, NOW),
+        "A35",
+        |e| matches!(e, AnchorVerificationError::UnsupportedLogRoot(root) if root == "LOG-TREE"),
+    );
+
+    let mut cp_bad = cp.clone();
+    cp_bad.log_size = 1;
+    expect_error(
+        verify_anchor(&envelope_for(&cp_bad), &cfg, &pol, &s, NOW),
+        "A36",
+        |e| matches!(e, AnchorVerificationError::NonZeroLogSize(size) if *size == 1),
+    );
 }

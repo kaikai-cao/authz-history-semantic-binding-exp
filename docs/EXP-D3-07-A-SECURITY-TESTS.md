@@ -4,7 +4,7 @@
 
 - `tests/d3_07_a_anchor.rs`
 - Test-only Ed25519 keys are derived from `b"exp-d3-07-a-test-only"` via the D1-style deterministic derivation. No production key material is used.
-- All A01–A28 cases construct full `AnchorEnvelope` values and pass them into the verifier. Negative cases are not rejected by a constructor before entering the tested path.
+- All A01–A36 cases construct full `AnchorEnvelope` values and pass them into the verifier. Negative cases are not rejected by a constructor before entering the tested path.
 
 ## 2. QC tests
 
@@ -62,7 +62,24 @@ The time checks are policy checks over a signed D1 `timestamp`; they do not clai
 
 A22–A28 share one keygen and one honest GG proof. A24 and A28 jointly confirm that proof failure never advances the local checkpoint state.
 
-## 6. Boundary of test evidence
+## 6. Trusted config and profile fail-closed tests (R1)
+
+All eight cases below enter `verify_anchor` with a complete envelope. They are not rejected by a test helper; A29/A30 additionally clear the QC signatures to show that a bad threshold cannot admit a zero-signature QC. A35/A36 use a validly re-signed QC so that only the profile field is wrong.
+
+| Case | Condition | Expected error | Result |
+| --- | --- | --- | --- |
+| A29 | config `threshold = 0`, empty QC | `InvalidThreshold { got: 0, expected: 3 }` | pass |
+| A30 | config `threshold = 1` | `InvalidThreshold { got: 1, expected: 3 }` | pass |
+| A31 | three witnesses instead of four | `InvalidWitnessCount { got: 3, expected: 4 }` | pass |
+| A32 | repeated `witness_id` in config | `ConfigDuplicateWitnessId("w0")` | pass |
+| A33 | repeated public key in config | `ConfigDuplicatePublicKey("w1")` | pass |
+| A34 | 31-byte hex key and non-decompressible Ed25519 key | `InvalidConfigPublicKey("w0")` / `InvalidConfigPublicKey("w1")` | pass |
+| A35 | `log_root = "LOG-TREE"`, validly re-signed | `UnsupportedLogRoot("LOG-TREE")` | pass |
+| A36 | `log_size = 1`, validly re-signed | `NonZeroLogSize(1)` | pass |
+
+A positive control with the untouched 3-of-4 config and `NO_LOG`/`0` profile is verified in the same test, so the rejections are attributable to the changed field. Config validation precedes QC parsing and signature counting.
+
+## 7. Boundary of test evidence
 
 These tests show that the implemented host verifier follows its declared checks. They do not prove:
 
@@ -70,4 +87,5 @@ These tests show that the implemented host verifier follows its declared checks.
 - that a timestamp window implies latest state;
 - that first contact can detect historical rollback;
 - that a quorum cannot re-sign an old state under broken key/lock assumptions;
+- that a caller-supplied trusted config is authentic; config provisioning is external to this verifier;
 - Halo2 soundness beyond the existing D3-06-C test suite.
