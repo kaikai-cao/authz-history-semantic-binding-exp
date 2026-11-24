@@ -1,10 +1,12 @@
 # EXP-D3-07-B-HALO2-FEASIBILITY-01 — 多 Witness 授权状态证明的 Halo2 电路化可行性评估
 
 > 设计评估产物，**不实现新电路、不修改 public instance、不改任何冻结成果**。
-> 基线：分支 `exp-d3-07-b-closure-01` @ `b26c90b11f589f3f5292c635d96d68acce714c29`。
-> 工作分支：`exp-d3-07-b-halo2-feasibility-01`。唯一新增文件：`docs/EXP-D3-07-B-HALO2-FEASIBILITY.md`。
+> 初始基线：分支 `exp-d3-07-b-closure-01` @ `b26c90b11f589f3f5292c635d96d68acce714c29`。
+> 初始工作分支：`exp-d3-07-b-halo2-feasibility-01`。唯一文件：`docs/EXP-D3-07-B-HALO2-FEASIBILITY.md`。
 >
 > **本轮成功标准**：不是论证"什么都能放进 Halo2"，而是得到一个经得起检查的答案——究竟应该证明什么、为什么值得（或不值得）证明。核心判据：能否让验证者在**不获得完整授权历史**的前提下，验证某个多 Witness 授权状态及其转换满足定义的安全规则，且成本合理。
+>
+> **修订记录 — D3-07-B-BINDING-CLARIFICATION-01**（工作分支 `exp-d3-07-b-binding-clarification-01`，基线 `13ed1ae37ded16489af3659dfc4c6abb4cd0b76f`）：本轮仅做文档级证明语句审查与修订，回答单一问题——**外部已验证的多 Witness 证据如何真正绑定到 Halo2 证明描述的状态转换**。保留 §2/§4 A–C 评估与 §8 成本数据原样；新增 §5.1 公开语句缺口与反例、§5.2 四种绑定架构 A/B/C/D、§5.3 原 MIN-PROOF-B 语句的越界表述、§6 两个可成立的证明语句与信任边界；重写 §10 价值判断与 §12 最终决策为 `STOP_HALO2_DIRECTION`。未改任何电路/instance/冻结成果。
 
 ## 证据标签（全文统一）
 
@@ -133,43 +135,131 @@ D3-07-B 已收束：P1 给出确定性模拟证据，P2 给出 Model B 协议设
 | 与"不硬塞 BFT"要求 | 符合 | 符合 | 冲突 |
 | 推荐度 | 作为内核必要 | **推荐进一步设计** | 不推荐（当前需求下） |
 
----
-
-## 5. 最小可行证明语句（推荐：方案 B 的精简版）
-
-回答用户核心问题："给定一个外部锚定的 checkpoint 和一组多 Witness 授权状态证据，证明者能证明什么，而不需要公开完整授权历史？"
-
-**推荐语句（MIN-PROOF-B）**：
-
-> 给定公开的前后状态摘要 `C_prev`/`C_next`、epoch/版本与事件承诺，证明者知道一份合法的两事件转换见证（GR/RR/IR 的 opening 与状态字），以及一份经链下验证的多 Witness 证据的**规范哈希** `H_evidence`。证明：
-> (i) `C_prev → C_next` 是 D3-06-C 定义的两事件合法转换（复用现有电路）；
-> (ii) `H_evidence` 的规范预像所绑定的 `(lock_key, checkpoint_digest, C_prev, C_next)` 与本次被证明的状态转换对象逐字段一致。
->
-> 验证者无需看到任何 Witness 投票、签名、完整授权历史或 Merkle 全树，只需 8 个 public instance + 证明即可确认上述两点。
-
-关键限定（`RULE_DERIVED`）：
-- (ii) 只证明**对象一致性**，不证明 `H_evidence` 背后的签名有效或 quorum 成立——那是链下前提。
-- 不把整个 Witness 状态机搬进电路；不改 8 个 instance；`H_evidence` 作为 private witness，其"已被链下验证"是外部信任假设。
-- 这**不是**"多 Witness 协议安全"的证明，而是"状态转换与其链下认证对象一致"的证明——增量明确、边界诚实。
+> **§4 修订注记（BINDING-CLARIFICATION-01）**：上表与 §4.2 对方案 B 的"推荐进一步设计"是初始评估，其默认前提是把 `H_evidence` 作为 private witness 即可完成绑定。**本轮 §5.1 证明该前提不成立**：private-only 哈希绑定在密码学上无法让验证者确认外部证据来源，存在明确的证明者伪证构造。上表"证据-状态对象一致性"一列应改读为"仅在公开语句包含 evidence commitment 或采用 verifier-level 组合验证时才可能成立"。§4 的 A/B/C 结构性分析与 §8 成本数据保持不变，最终决策以 §12 为准。
 
 ---
 
-## 6. Public inputs / Private witness / Constraints
+## 5. 外部证据绑定缺口与证明语句修订（BINDING-CLARIFICATION-01）
 
-### 6.1 Public inputs（冻结 8 个，不新增）
+本节回答本轮唯一问题。先精确定义当前 MIN-PROOF-B 的绑定缺口（§5.1），再比较四种绑定架构（§5.2），再列出原语句中超出证明关系的表述（§5.3）。可成立的两个证明语句见 §6。
 
-沿用 §3 表格：`C_prev, prev_epoch, C_next, next_epoch, policy_id, transition_version, D_E, event_count=2`（`SOURCE_VERIFIED`）。MIN-PROOF-B **不引入第 9 个 instance**。若需要让验证者核对 `H_evidence`，可选方案是把它并入 `D_E` 的语义（用 evidence 哈希参与 batch 承诺）或保持为链下前置——这是 `OPEN_QUESTION`，需后续决断，且必须评估是否改变现有 instance 语义（倾向不改变）。
+### 5.1 当前 MIN-PROOF-B 的公开语句缺口（`RULE_DERIVED`）
 
-### 6.2 Private witness
+**基础原则**：Halo2（及任意 zk-SNARK）证明的是公开语句 \(x\) 与私有见证 \(w\) 的关系 \(R(x,w)\)——验证者的输入只有 \(x\) 与 proof。凡未被纳入 \(x\)、也没有可验证外部锚点的值，对验证者而言就是证明者单方面提供的数据，**不能**被称为"已认证的外部证据"。
 
-- D3-06-C 现有见证：S0 的 GR/RR/IR opening、两事件的 grant/revoke 字段、IR slot/direction 位、状态字 mux 输入、epoch/policy 中间值（`SOURCE_VERIFIED`）。
-- 新增（MIN-PROOF-B）：`H_evidence`（链下证据规范哈希）及其规范预像字段 `(lock_key, checkpoint_digest, C_prev, C_next, round, signer_set_digest)`，用于电路内重算哈希并做字段一致性约束（`RULE_DERIVED`）。
+当前 MIN-PROOF-B 的结构（原 §5/§6.2）：
 
-### 6.3 Constraints
+- \(H_{evidence}\) 是 private witness；
+- 规范预像 \((lock\_key, checkpoint\_digest, C_{prev}, C_{next}, round, signer\_set\_digest)\) 也是 private witness；
+- 电路重算 \(H_{evidence} = H_{canonical}(预像)\)；
+- 电路把预像中的 `C_prev/C_next/lock_key` 字段与状态转换 cell `constrain_equal`；
+- **现有 8 个 public instances 不含独立的 \(H_{evidence}\)（也不含 `checkpoint_digest`/`signer_set_digest`/`round`）**。
 
-- **复用**：D3-06-C 全部约束（双事件根链、canonical 256-bit 分解、IR leaf 重算、state mux、slot=low_4(id)、batch 承诺、8 instance 绑定）（`SOURCE_VERIFIED`）。
-- **新增**：evidence 规范哈希约束 `H_evidence = H_canonical(lock_key, digest, C_prev, C_next, round, signer_set_digest)`（Poseidon，复用现有 gadget）+ 字段相等约束把预像中的 `C_prev/C_next/lock_key` 与状态转换对应 cell constrain_equal（`RULE_DERIVED`）。
-- **不引入**：Ed25519 验签约束、quorum 求和约束、锁转移不等式约束（这些留在链下，见 §7）。
+逐项回答本轮四问：
+
+1. **证明者能否自行选择一组预像字段并计算对应哈希？能。** 电路只证明"所给哈希等于所给预像的哈希"这一内部自洽关系；预像与哈希都在 \(w\) 中，证明者可任意选取后重算，约束恒成立。
+2. **验证者能否仅凭 8 个 public instances + proof 确认该哈希来自链下已验证证据？不能。** 验证者的 \(x\) 里根本没有 \(H_{evidence}\) 的锚点，无法把 \(w\) 中那个哈希与链下 verifier 的输出做任何比对。
+3. **当前 MIN-PROOF-B 实际证明什么？** 只证明两件事的合取：(i) 8 instance 描述的 `C_prev→C_next` 是合法两事件转换（= D3-06-C 已有能力）；(ii) 证明者掌握某个预像，其 `C_prev/C_next/lock_key` 字段与公开 instance 相等、且其哈希被正确计算。(ii) 中真正代表"外部证据"的 `checkpoint_digest`/`signer_set_digest`/`round` 没有 public 锚点，因此 (ii) 对验证者的可确认增量≈0（详见反例）。
+4. **原文档哪些表述超界？** 见 §5.3。
+
+**明确反例 / 攻击者构造（`RULE_DERIVED`）**：
+
+设链下 verifier 已对 checkpoint \(C\) 验证出一组合法 QC，其规范证据对象为 \(E\)，真实哈希 \(H_{honest}=H_{canonical}(E)\)，其中 \(E.signer\_set\_digest\) 编码 3 个真实签名者、\(E.checkpoint\_digest=H(C)\)。
+
+恶意证明者 \(P\)（或恶意 Gateway）**手上没有任何有效 QC**（例如根本不存在对 \(C\) 的 3 份 PRECOMMIT）。\(P\) 这样做：
+
+1. 取公开 \(x\) 中的 `C_prev/C_next/policy_id/epoch/version`（这些本就公开）；
+2. 自造 `checkpoint_digest' = H(C')`，其中 \(C'\ne C\) 可任意选；
+3. 自造 `signer_set_digest' = H(任意 3 个 Witness ID)`，这些 Witness 可能从未签过任何东西；
+4. 自造 `round'` 与 `lock_key'` 中未被 instance 钉住的部分；
+5. 令预像 \('=(lock\_key', checkpoint\_digest', C_{prev}, C_{next}, round', signer\_set\_digest')\)，计算 \(H_{evidence}'=H_{canonical}(预像')\)；
+6. 以 \(H_{evidence}'\) 与预像 \('\) 作为 private witness 生成 proof \(\pi\)。
+
+电路全部约束满足（哈希自洽 + \(C_{prev}/C_{next}/lock\_key\) 与公开 instance 相等），验证者 `verify(\pi, x)` 通过。验证者因此"确认"了一条声称绑定多 Witness 证据的证明，而其中的证据字段是证明者凭空捏造的。**这正是用户指出的原则：承诺只在 \(w\) 中，验证者无独立可信依据，就不能当作已认证的外部证据。** 该攻击不需要伪造签名、不需要凑 quorum、不需要 2 个诚实双签——纯由绑定缺口产生。注意它不改变状态转换本身的合法性（那仍由 D3-06-C 保证），它击穿的是"证据-状态对象一致性"这一 MIN-PROOF-B 的全部增量声称。
+
+### 5.2 四种绑定架构比较
+
+| 架构 | 电路 / 公开语句能约束什么 | 验证者能确认什么 | 能否绑定链下已验证证据 | 证明者能否自造伪证据预像 |
+| --- | --- | --- | --- | --- |
+| **A 私有哈希 + 私有预像**（当前 MIN-PROOF-B） | 哈希自洽；部分字段 = public instance | 仅状态转换（8 instance）；证据字段不可见 | **不能**（§5.1 反例） | **能** |
+| **B 新增独立 public \(H_{evidence}\)** | \(x'=\)8 instance +\(H_{evidence}\)；哈希=预像哈希；字段一致 | 存在预像使哈希等于**公开的** \(H_{evidence}\) 且状态字段一致 | 能，条件：verifier 从可信源取得该 public 值 | 否（篡改 public 值则 proof 失效） |
+| **C 纳入现有 \(D_E\)** | 改变 \(D_E\) 公式 | 取决于新语义 | 需改电路才能成立 | — |
+| **D 链下认证信封 + proof 组合验证** | 电路仍只证状态转换；绑定由外部 verifier 完成 | 由外部 verifier 联合确认（信封 + instance + proof） | 能，但属 **verifier-level** 绑定 | 否（信封签名阻断） |
+
+**A. 私有哈希与私有预像**：不得描述为"已完成外部证据认证"。它认证的只是证明者自洽，验证者侧零增量。结论 `REJECT_PRIVATE_ONLY_BINDING`。
+
+**B. 增加独立 public commitment**：建立清晰公开语句，密码学增量真实——\(H_{evidence}\) 进入 \(x\) 后由 verifier 填入，证明者无法单方改动。**但**：违反冻结的 8 instance、需新增第 9 个 public input 与新电路接口，本轮禁止实际增加；且即便允许，其可证性质仍是"对象一致性"的组合式工程绑定，不是新原语或新的正确性性质。结论 `REVISE_PUBLIC_STATEMENT_REQUIRED`（仅作为未来选项，非本轮动作）。
+
+**C. 将 evidence commitment 纳入现有 \(D_E\)**：\(D_E\) 当前准确语义是 `H(D3-BATCH-v1, 2, C0, C1, pad)`——**两事件批承诺**，不是证据承诺（`SOURCE_VERIFIED`，D3-06-C `d3_06_c_circuit.rs`）。纳入 evidence 会把它变成"事件批 + 证据"混合承诺，改变语义；D3-06-C 按固定公式内部计算 \(D_E\)，改公式即改冻结电路，D3-07-A 的 `bind_to_instances` 与历史兼容性同时受影响；需新版本标识与新电路。**字段数量相同 ≠ 语义可复用**：在不改变现有语义的前提下无法完成绑定。结论：本轮不可行。
+
+**D. 链下认证信封 + Halo2 proof 组合验证（verifier-level binding）**：
+
+1. 链下 verifier 验证 Ed25519 签名、Witness 身份唯一性、quorum、checkpoint（现有 D3-07-A host 侧能力）；
+2. 对规范化证据对象生成认证信封，字段至少含 8 个状态字段（`C_prev, prev_epoch, C_next, next_epoch, policy_id, transition_version, D_E, event_count`）＋ `checkpoint_digest, round, signer_set_digest, chain_id, set_id`；
+3. 信封由可信验证主体签名——签名主体是谁为 `OPEN_QUESTION`（选项：链下 verifier 自身 / D3-07-A anchor 签发者 / 专用认证服务）；
+4. 外部 verifier 验证信封签名；
+5. 外部 verifier 逐字段对照信封状态字段与 Halo2 proof 的 8 个 public instances；
+6. 外部 verifier 验证 Halo2 proof；
+7. 全部通过才接受。
+
+- **信任主体**：信封签发者（签名真实性）、Halo2 soundness、verifier 对照逻辑实现、外部 checkpoint 源。
+- **绑定字段与重放防护**：信封绑定具体 `C_prev/C_next` → 跨 proof 重放需 public instance 完全相同；绑定 `epoch/policy/transition_version` → 跨 epoch/policy 重放被字段对照阻断；anti-rollback 由外部 verifier 的 high-water 状态维护（D3-07-A 已有本地机制）。
+- **关联在哪完成**：信封与 proof 的关联由**外部 verifier** 在步骤 5–6 完成，不是电路约束。
+- **性质归属**：这是**组合验证 / verifier-level binding，不是 Halo2 电路新增的密码学保证**，必须如此称呼，不得写成 circuit-level guarantee。
+- **与现有能力的关系**：D3-07-A 已实现 `verify_anchor → bind_to_instances → verify_transition_proof → commit`；D 的信封签名≈其 QC 签名、字段对照≈其 `bind_to_instances`、proof 验证≈其 Halo2 步骤。**增量≈0，属已有工程能力的重复包装**。
+
+### 5.3 原 MIN-PROOF-B 语句中超出证明关系的表述（`RULE_DERIVED`）
+
+| 原表述（位置） | 问题 | 修订 |
+| --- | --- | --- |
+| "`H_evidence` 的规范预像所绑定的 `(lock_key, checkpoint_digest, C_prev, C_next)` 与本次状态转换对象逐字段一致"（原 §5(ii)） | `checkpoint_digest` 无 public 锚点，该"一致"对验证者不可验证 | 删除该声称；只有 public instance 内的字段才对验证者可确认 |
+| "只需 8 个 public instance + 证明即可确认上述两点"（原 §5 末） | (ii) 无法被确认（§5.1 反例） | 改为：只能确认 (i) 状态转换 |
+| "把链下认定的 QC 对象与电路证明的状态转换对象锁死为同一个"（原 §4.2） | private-only 下没有东西把它锁到"链下认定" | 改为：仅在 public commitment 或 verifier-level 组合下才可能 |
+| "可选把 \(H_{evidence}\) 并入 \(D_E\) 语义或保持链下前置"（原 §6.1） | 淡化了缺口；并入 \(D_E\) 会改冻结语义（§5.2-C） | 明确为需决策的阻断项，不得默认并入 |
+| "证据-状态对象一致性 ✓ 仅哈希绑定"（原 §7 表） | 夸大；private-only 不构成 verifier 可验证的一致性 | 改为 ✗（电路）/ ✓（仅 verifier-level，见 §6.2） |
+| "有条件推荐 MIN-PROOF-B"（原 §11） | 建立在 private-only 绑定成立的错误前提上 | 撤回，见 §10/§12 |
+
+---
+
+## 6. 两个可成立的证明语句与信任边界（BINDING-CLARIFICATION-01）
+
+原 §6 的 public/private/constraints 分解按"private \(H_{evidence}\) 即可绑定"的错误前提组织；本轮改为按两个**逻辑闭合**的语句重述。D3-06-C 的见证与约束清单（`SOURCE_VERIFIED`）在两版中作为状态转换内核原样复用，见 §8。
+
+### 6.1 版本一：纯 Halo2 证明语句（不新增 instance）
+
+- **Public statement \(x\)**：冻结 8 个——`C_prev, prev_epoch, C_next, next_epoch, policy_id, transition_version, D_E, event_count=2`（§3，`SOURCE_VERIFIED`）。**没有** \(H_{evidence}\) 或任何证据字段。
+- **Private witness \(w\)**：D3-06-C 现有见证（S0 的 GR/RR/IR opening、两事件 grant/revoke 字段、IR slot/direction 位、状态字 mux 输入、epoch/policy 中间值）；可含 \(H_{evidence}\) 及预像，但它们**不进入 \(x\)**（`SOURCE_VERIFIED` + `RULE_DERIVED`）。
+- **Relation \(R(x,w)\)**：D3-06-C 两事件合法转换（双事件根链、canonical 256-bit 分解、IR leaf 重算、state mux、slot=low_4(id)、batch 承诺、8 instance 绑定）。若保留 evidence 约束，则附加 \(H_{evidence}=H_{canonical}(预像)\) 与预像状态字段 = public 字段——但这是 verifier-invisible 的冗余约束（`RULE_DERIVED`）。
+- **Verifier 检查**：仅 `verify(\pi, x)`。
+- **能确认**：从公开 `C_prev` 出发存在合法两事件转换得到公开 `C_next`，事件承诺为公开 `D_E`，epoch/policy/version 按 instance 约束推进。
+- **不能确认**：任何多 Witness 协议性质——签名有效性、quorum 形成、checkpoint_digest、round、signer_set_digest、证据-状态对象一致性，因为这些都**不在 \(x\)**（§5.1 反例）。
+- **结论**：版本一 = D3-06-C 原能力；把 \(H_{evidence}\) 放进 private witness **不改变验证者能确认的任何性质**。它是本轮唯一在不改冻结 instance 下可实现的语句，但没有新增可验证性质。
+
+### 6.2 版本二：组合验证语句（verifier-level binding）
+
+- **Halo2 proof 证明的关系**：与版本一相同的 \(R_{D3-06C}(x,w_H)\)，\(x\)=8 instance，\(w_H\)=状态转换见证；证据承诺不作为电路内可验证对象。
+- **外部认证信封证明的关系**：\(E=\mathrm{Sig}_{VK_v}(\mathrm{canonical}(\,8\ \text{instance 字段}\ \cup\{checkpoint\_digest, round, signer\_set\_digest, chain\_id, set_id\}\,))\)。它断言"该规范化证据对象已被可信 verifier 按 D3-07-A 规则验证"。
+- **Verifier 对两者的关联检查**（全部由**外部 verifier** 执行，非电路）：
+  1. `verify_envelope_sig(E, VK_v)` —— 信任信封签发者；
+  2. 对 8 个字段逐项 `E.field[i] == x[i]` —— 字段对照；
+  3. `verify(\pi, x)` —— Halo2 soundness；
+  4. 链下 anti-rollback/freshness（D3-07-A 本地 high-water 与时间策略）。
+- **验证者需要信任的主体**：信封签发者（签名真实性）、Halo2 soundness 的密码学假设、外部 verifier 的字段对照实现、外部 checkpoint 来源。
+- **最终接受条件**：\(1\land2\land3\land4\) 全部通过；任一失败即拒绝，且不推进本地状态（沿用 D3-07-A `combined.rs` 顺序纪律）。
+- **不能确认**：globally latest（QC/PoLC 均不证明）、crash-safe 持久化（G2 外部前提）、BFT soundness（S-A 为规则层人工推导，非电路/非形式化）；**对象绑定由 verifier 完成，不是 Halo2 电路独立证明的性质**。
+
+### 6.3 性质归属与信任边界（`RULE_DERIVED`）
+
+| 性质 | 由谁支持 | 证据等级 |
+| --- | --- | --- |
+| 两事件状态转换合法性、前后摘要一致、事件承诺、epoch 推进 | Halo2 soundness（\(R_{D3-06C}\)） | `SOURCE_VERIFIED` 电路 + soundness 假设 |
+| 信封确由可信主体签发（含"已验证 QC"断言） | 签名安全性（信封签发者密钥） | `OPEN_QUESTION`（签发主体未定） |
+| Ed25519 验签、身份唯一性、quorum、锁转移纪律、freshness、持久化判定 | 链下 verifier（D3-07-A + P2 规则层） | `RULE_DERIVED` / 外部信任 |
+| S0 真实性 | 外部 checkpoint 源 | 外部信任 |
+| 对象一致性（信封 ↔ proof） | **外部 verifier 字段对照** | verifier-level，非电路保证 |
+| globally latest / crash-safe / BFT soundness | 无任何层独立证明 | 明确不可确认 |
+
+**必须不写错**：版本二中"对象绑定"由外部 verifier 完成，属于**组合验证 / verifier-level binding**；把它写成"Halo2 电路独立证明"即为错误表述（`RULE_DERIVED`）。
 
 ---
 
@@ -181,7 +271,7 @@ D3-07-B 已收束：P1 给出确定性模拟证据，P2 给出 Model B 协议设
 | 前后状态摘要一致性 | ✓ | — | — |
 | 事件顺序/根链 | ✓ | — | — |
 | checkpoint 字段↔状态摘要绑定 | ✓ | — | — |
-| 证据-状态对象一致性（MIN-PROOF-B） | ✓ 仅哈希绑定 | 生成规范证据哈希 | 链下哈希由诚实 verifier 产生 |
+| 证据-状态对象一致性 | ✗（private-only 不可验证，§5.1） | ✓ 仅版本二 verifier-level 字段对照 | 组合验证，非电路保证；须信任信封签发者与对照实现 |
 | Ed25519 签名有效性 | ✗ | ✓ | 验证者须信任链下验签 |
 | Witness 身份/唯一性 | ✗ | ✓ | 须信任配置与去重 |
 | PoLC/QC quorum 形成 | ✗ | ✓ | 须信任 quorum 判定 |
@@ -190,7 +280,7 @@ D3-07-B 已收束：P1 给出确定性模拟证据，P2 给出 Model B 协议设
 | 执行时 freshness / globally latest | ✗ | 部分（D3-07-A 时间策略） | **电路与链下都不能独立证明全局最新** |
 | crash-safe 持久化 | ✗ | 部分（外部原语假设） | **G2 是外部前提，未被任何层验证** |
 
-**结论**：即使采用 MIN-PROOF-B，验证者仍需信任链下完成签名/quorum/freshness/持久化判定。电路增加的是**状态转换与其认证对象的一致性**，不是"BFT 安全"或"全局最新"。把这些性质合并成笼统的"ZK 安全"是错误表述（`RULE_DERIVED`）。
+**结论（BINDING-CLARIFICATION-01 修订）**：private-only MIN-PROOF-B 连"状态转换与其认证对象的一致性"都无法让验证者确认（§5.1 反例），该行已从电路能力中撤销。即使在版本二的 verifier-level 组合下，验证者仍需信任链下完成签名/quorum/freshness/持久化判定与信封签发；对象一致性由外部 verifier 对照完成，**不是电路保证**。把这些性质合并成笼统的"ZK 安全"或写成"Halo2 独立证明"是错误表述（`RULE_DERIVED`）。
 
 ---
 
@@ -232,7 +322,7 @@ D3-07-B 已收束：P1 给出确定性模拟证据，P2 给出 Model B 协议设
 
 **依赖的假设**（`RULE_DERIVED`）：
 - 外部锚定的 checkpoint（D3-07-A）可信且相对本地未回滚；哈希抗碰撞（Poseidon 在电路内、SHA-256 在 anchor 链下）。
-- 链下 verifier 诚实产生 `H_evidence`（方案 B 的核心外部信任）。
+- （BINDING-CLARIFICATION-01 修订）版本一无证据相关假设——private `H_evidence` 不构成可验证对象（§5.1）。版本二的额外假设是：认证信封由可信主体签发、外部 verifier 正确执行 8 字段对照、该主体按 D3-07-A 规则验证过签名/quorum；**这些都不是电路假设，也不被电路验证**。
 - D3-06-C 的 S0 跨结构一致、revoker 权限、ID 映射等既有假设不变。
 
 **电路与本协议都不能证明**（`RULE_DERIVED` / `SOURCE_VERIFIED`）：
@@ -251,38 +341,60 @@ D3-07-B 已收束：P1 给出确定性模拟证据，P2 给出 Model B 协议设
 1. **D3-06-C 已证明什么**：可信 S0 上两事件顺序合法状态转换（`S0→S1→S2`），8 instance 绑定，双事件根链（`SOURCE_VERIFIED`）。
 2. **D3-07-A 已补充什么**：把 `C_prev` 用外部 checkpoint/QC（host 侧 Ed25519 验签 + 时间策略 + 本地 anti-rollback）锚定，并与同一 8 instance 绑定；不证全局最新（`SOURCE_VERIFIED`）。
 3. **D3-07-B 增加了什么协议层性质**：多 Witness 轮次锁定/恢复规则、PoLC/QC/quorum 的严格纪律、冲突 QC 不可共存的规则层安全论证、崩溃与 freshness 边界（`SOURCE_VERIFIED`/`RULE_DERIVED`）。
-4. **下一阶段 Halo2 证明增加什么新可验证性质**：若采用 MIN-PROOF-B，新增的是"状态转换对象与链下认证对象一致"的可证明绑定；**不是** quorum 安全或全局最新（`RULE_DERIVED`）。
-5. **只把链下验证结果哈希进电路是否带来新密码学保证**：带来的是**一致性保证**（对象绑定），不是**正确性保证**（签名/quorum 已由链下判定）。若连一致性都不需要（即信任 Gateway 喂给两边的是同一 checkpoint），则增量≈0，不值得做（`RULE_DERIVED`）。这是决定"值不值得"的关键分水岭。
-6. **不把 Ed25519 验签纳入电路，验证者信任谁**：信任链下 verifier 的签名验证、Witness set 配置、quorum 判定、freshness 与持久化；电路只把这些判定的**对象**与状态转换绑定（`RULE_DERIVED`）。
-7. **是否存在更小、更清晰、更有价值的问题**：**有**——MIN-PROOF-B（证据-状态对象一致性绑定）比"完整证明多 Witness 协议"更小、更清晰，且不把 BFT 塞进电路。它的价值取决于是否能说清"验证者确实需要独立确认对象一致性"这一需求（`RULE_DERIVED`/`OPEN_QUESTION`）。
+4. **下一阶段 Halo2 证明增加什么新可验证性质（BINDING-CLARIFICATION-01 修订）**：版本一（纯 Halo2）新增 = **0**，因 private \(H_{evidence}\) 不对验证者产生可确认关系（§5.1）。版本二（组合）的"对象一致性"由外部 verifier 对照完成，不是 Halo2 电路新增的可证性质。**因此没有任何一种在不改冻结 instance 的方式下产生电路级新性质**（`RULE_DERIVED`）。
+5. **只把链下验证结果哈希进电路是否带来新密码学保证**：private-only 下**不带来**（§5.1 反例：验证者无法区分真哈希与证明者自造哈希）。即便改为 public commitment（§5.2-B），带来的也只是"对象一致性"而非"正确性"——签名/quorum 仍由链下判定；且需新增 instance（本轮禁止）。若信任 Gateway 喂给两边的是同一对象，则增量≈0（`RULE_DERIVED`）。
+6. **不把 Ed25519 验签纳入电路，验证者信任谁**：版本二下信任链下 verifier 的签名验证、Witness set 配置、quorum 判定、freshness、持久化，以及认证信封签发者与字段对照实现；电路只证状态转换，不绑定这些判定的对象到电路公开语句（`RULE_DERIVED`）。
+7. **是否存在更小、更清晰、更有价值的问题**：经本轮审查，**原先寄望的 MIN-PROOF-B 并不成立**——它在不改 instance 时没有新的可证性质，要成立必须新增 public input（违反冻结）或退化为 verifier-level 组合（≈D3-07-A 重复）。在 D3-07-B 范围内**未找到**值得电路化的新证明关系（`RULE_DERIVED`）。
 
 **区分六类性质，不合并为笼统"ZK 安全"**：电路约束正确性（电路内）、链下签名验证正确性（链下）、Witness quorum 安全性（规则层人工论证）、外部 checkpoint 真实性（外部信任）、全局 freshness（外部，未解决）、真实执行与持久化安全（G2 外部前提）——各自证据等级不同，见 §7/§9（`RULE_DERIVED`）。
 
-**创新空间诚实判断**：MIN-PROOF-B 的新意仅在"证据对象绑定"，属于组合式工程绑定，不是新原语、新证明语句或新可证性质；按用户既定的研究价值门槛（非组合式新原语/新证明语句 + 可证性质 + 最小实验），它**不太可能单独构成论文级贡献**（`RULE_DERIVED`）。方案 C 虽可独立检查 quorum，但成本与"硬塞 BFT"问题使其不优（`THEORETICAL_ESTIMATE`）。
+**创新空间诚实判断（BINDING-CLARIFICATION-01 修订）**：MIN-PROOF-B 原本寄望的"证据对象绑定"经审查为**不成立**（private-only 无可验证增量）或**非电路性质**（verifier-level 组合）。它既不是新原语，也不是电路级新证明语句/新可证性质；按用户既定门槛（非组合式新原语/新证明语句 + 可证性质 + 最小实验），它**不构成论文级贡献，且当前形态连组合式增量都无法成立**（`RULE_DERIVED`）。方案 C 虽可独立检查 quorum，但成本（`NOT_MEASURED`）与"硬塞 BFT"冲突使其不优（`THEORETICAL_ESTIMATE`）。**结论：不为保留 Halo2 方向而强行制造一个 Halo2 问题**（见 §12）。
 
 ---
 
-## 11. 推荐方案与不推荐方案
+## 11. 推荐方案与不推荐方案（BINDING-CLARIFICATION-01 修订）
 
-- **推荐**：MIN-PROOF-B（方案 B 精简版），**但仅为"有条件推荐"**——前提是能明确"验证者需要独立确认认证对象与状态转换对象一致"这一真实需求。它复用 D3-06-C、不新增 instance、增量成本小、不把 BFT 塞进电路。若进入实现，先做 MockProver 层的一致性约束验证，再做小规模实测（`RULE_DERIVED`）。
+- **不推荐 - private-only MIN-PROOF-B（原"有条件推荐"已撤回）**：其绑定在密码学上不成立（§5.1 明确反例）；"状态转换对象与认证对象一致"不是验证者可确认的性质（`RULE_DERIVED`）。
 - **不推荐 - 方案 A 作为独立目标**：重复 D3-06-C，零增量（`SOURCE_VERIFIED`）。
+- **不作为本轮动作 - 方案 B 新增 public commitment（§5.2-B）**：能建立清晰公开语句，但违反冻结 8 instance、需新电路接口；本轮禁止。即便未来允许，其性质是组合式工程绑定，不构成论文级贡献（`RULE_DERIVED`）。
 - **不推荐 - 方案 C 在当前需求下**：Ed25519 非原生验签成本高、无组件、无实测，且与"不硬塞 BFT"冲突；除非出现"验证者完全不能信任链下 verifier"的硬性需求，否则不投入（`THEORETICAL_ESTIMATE`/`NOT_MEASURED`）。
 - **不推荐 - 纯"再哈希协议摘要"**：无新可验证性质，不构成 ZK 贡献（`RULE_DERIVED`）。
+- **唯一逻辑闭合但非新增贡献的方案 D**：verifier-level 组合验证，增量≈D3-07-A 已有能力，仅作为"若必须做对象绑定"时的工程组合参考，**不构成进入电路实现的理由**（`RULE_DERIVED`）。
 
 ---
 
-## 12. 后续是否进入电路实现的明确决策
+## 12. 最终决策（BINDING-CLARIFICATION-01）
 
-**本轮决策：`CONDITIONAL_HOLD`——不立即进入电路实现。**
+**本轮最终决策（四选一）：`STOP_HALO2_DIRECTION`——结束 D3-07-B 的 Halo2 电路化支线，不进入任何电路实现。**
 
-理由与门禁条件：
-- 现有 D3-06-C + D3-07-A 已覆盖状态转换与外部锚定；D3-07-B 的核心贡献是协议层规则与安全论证，其天然归链下。
-- MIN-PROOF-B 是唯一有增量且成本可控的候选，但其价值取决于一个尚未确认的需求（对象一致性是否值得独立证明）。在需求未确认前投入实现，风险是"做完发现无新意"（`RULE_DERIVED`）。
-- 进入实现前必须确认（均为 `OPEN_QUESTION`）：
-  1. 是否存在真实验证者需要独立检查"证据-状态对象一致性"，而非信任 Gateway？
-  2. `H_evidence` 的暴露方式（并入 `D_E` 语义 vs 链下前置）是否改变现有 8 instance 语义？倾向不改变。
-  3. MIN-PROOF-B 的 K 是否仍为 16、prove/verify 增量实测数据。
-  4. 该工作是否达到用户既定研究价值门槛（非组合式贡献 + 可证性质 + 最小实验）。
-- 若上述 1 与 4 得到肯定回答，则进入 MIN-PROOF-B 的 MockProver 原型；若否定，则 D3-07-B 的 Halo2 电路化研究到此为止，结论为"协议性质归链下、不新增电路"。
+技术前提取向 `REJECT_PRIVATE_ONLY_BINDING`（§5.1 反例证明 private-only 绑定不成立），它是导出最终决策的依据之一，不是与最终决策并列的第二个选项。
 
-**最终诚实结论**：就当前证据与研究价值判据，最扎实的可验证增量是 MIN-PROOF-B 的对象一致性绑定；它值得进一步设计，但**尚不足以无条件启动电路实现**。本轮不修改任何电路、instance 或冻结成果，等待对上述门禁条件的人工决断。
+### 12.1 从四个候选中选择
+
+任务包给定四个选项，逐项裁定（仅第一行为最终决策）：
+
+| 候选 | 裁定 | 依据 |
+| --- | --- | --- |
+| `REJECT_PRIVATE_ONLY_BINDING` | 技术裁定成立（非最终决策） | §5.1 给出明确反例：private \(H_{evidence}\) 与预像下，证明者可自造 `checkpoint_digest/signer_set_digest/round` 并重算哈希，验证者仅凭 8 instance + proof 无法区分真伪。private-only 绑定在密码学上不成立——这是导出下面最终决策的技术前提。 |
+| `CONDITIONAL_HOLD_COMPOSITE_VERIFICATION` | 不采纳为推进理由 | 版本二组合验证逻辑可闭合，但增量≈D3-07-A 已有 `verify_anchor→bind→proof→commit`；它只是 verifier-level engineering binding，不构成"值得继续投入电路"的新理由。 |
+| `REVISE_PUBLIC_STATEMENT_REQUIRED` | 记录为未来选项，非本轮动作 | 方案 B 新增 public \(H_{evidence}\) 确能建立公开语句，但违反冻结 8 instance、需新电路接口（本轮禁止），且其性质仍是组合式工程绑定。 |
+| `STOP_HALO2_DIRECTION` | **采纳（本轮最终决策）** | 综合 §10：版本一无新增可验证性质；版本二≈已有组合；在冻结 instance 约束下未找到值得单独研究的电路级新证明关系（见 §12.2）。 |
+
+### 12.2 决策依据（守住判断标准）
+
+用户判据：*"不需要为了证明 Halo2 有用而强行制造一个 Halo2 问题。"* 逐条核对：
+
+1. **纯 Halo2 方案是否有新增可验证性质？否。** 版本一 = D3-06-C；private evidence 约束对验证者不可见（§6.1/§5.1）。
+2. **组合方案是否只是已有链下验证 + 现有电路的重复包装？是。** 版本二 = D3-07-A 的 anchor 验证/字段绑定/Halo2 proof 组合 + 一层 verifier 签名；无新电路级性质（§5.2-D）。
+3. **是否存在值得单独研究的新证明关系？在 D3-07-B 范围内未找到。** 唯一能建立公开语句的方案 B 需改冻结 instance 且仍是组合式绑定（§5.2-B）。
+
+三条全部命中 → 按既定标准**结束这条电路化支线**，保留 D3-06-C/D3-07-A 已有成果，不再为 MIN-PROOF-B 投入电路实现。
+
+### 12.3 阶段结论与保留事项
+
+- **保留成果**：D3-06-C 双事件状态链、D3-07-A anchor/freshness、P1/P2/P2-SA/收束/可行性评估（A/B/C 结构与成本数据）均有效，本轮零改。
+- **不声称**：不声称证明任何多 Witness 协议性质、globally latest、crash-safe 或 BFT soundness；不声称已验证任何具体存储实现。
+- **唯一 `OPEN_QUESTION`**：若未来出现"验证者完全不能信任链下 verifier"的硬性需求，方案 C（验签入电路）是一个**独立的新研究问题**，需重新评估 Ed25519-in-Halo2 成本与新原语价值（当前 `NOT_MEASURED`，本轮不投入）。
+- **本轮范围**：只做文档级证明语句审查与修订；未新增/修改任何电路、instance、MockProver 测试、性能实验或冻结成果。
+
+**最终诚实结论**：就当前证据与研究价值判据，private-only MIN-PROOF-B 的绑定不成立；可成立的两种语句要么无新增可验证性质（纯 Halo2），要么不是电路保证而是已有能力的 verifier-level 组合。**不存在值得进入电路实现的新证明关系，D3-07-B 的 Halo2 电路化评估到此为止。**
