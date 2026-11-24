@@ -20,6 +20,7 @@ pub mod e_r1_types;
 pub mod e_r1_types_host;
 pub mod e_r1_uniqueness;
 pub mod e_r2_types;
+pub mod e_r3_stats;
 pub mod e_types;
 pub mod e_types_host;
 pub mod types;
