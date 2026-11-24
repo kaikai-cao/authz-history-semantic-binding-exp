@@ -165,7 +165,7 @@ timeout_advance() 只改 current_round。
 - 同一 Witness 对冲突 digest 双签被记为 `adversarial_observations`，不计入诚实 Witness 的 S1；
 - 诚实 Witness 不因 BYZ 双签而放松自身锁（R1-B6）；
 - 双签证据可用于追责（slash），但本设计**不实现** slashing；
-- QC 门限 `Q=3` 保证：即使 1 个 Byzantine 双签，冲突 QC 仍需 3 个签名，其中至少 2 个必须是诚实节点——而诚实节点受锁规则约束，故冲突 QC 不可形成（论证见 SECURITY-ARGUMENT §2）。
+- 冲突 QC 不可同时形成的结论**不能仅由 quorum 交集和诚实签名者数量推出**：两个 3-of-4 集合交集至少含 1 个诚实 Witness，但跨轮改签还需分析锁转移规则（旧表述"至少 2 个诚实签名者"已判定无效）。完整 S-A 论证见 `SECURITY-ARGUMENT.md` §2：固定较早 QC 为锚点，利用相对锚点最小冲突 PoLC 与第一次离开锚点 digest 的 R-LOCK 约束导出矛盾。
 
 ## 4. 与 P1 场景的对应
 

@@ -16,11 +16,64 @@
 
 ### S-A：两个冲突 checkpoint 不会同时获得诚实协议认可的 QC
 
-- **假设**：f=1；签名不可伪造；honest Witness 遵守锁转移规则；Q=3。
-- **论证**：一个 QC 需 3 份同轮同 digest 的有效 precommit。两个冲突 QC 需共 6 份签名，来自 4 个 Witness，故至少 2 个 Witness 必须为两个冲突 digest 都签了 precommit（鸽巢原理）。但 honest Witness 在同一 `lock_key` 同一轮只能 precommit 一个 digest（S1），且换 digest 需满足 `locked_round < polc_round < current_round` 的合格 PoLC。f=1 下最多 1 个 Byzantine 双签，无法凑出第二个含 ≥2 honest 双签者的 QC。此论证结构对应 CometBFT "Proof of Safety"（见 REFERENCES §1）。
-- **失败边界**：若签名可伪造、f≥2、或 honest 节点违反锁规则、或持久化丢失导致节点忘记自己签过（AL1），论证失效。
-- **P1 覆盖**：P3-B（冲突 PoLC 不可达）、R1-B1–B8、U1（timeout 解锁反例，S2 失败）支持该结构；但不是形式化证明。
-- **证据标签**：由协议规则推导 + P1 模拟器验证结构性证据；**非** BFT soundness 证明。
+> 本节为正式论证，已与独立数学审计的冻结结论 `EXP-D3-07-B-P2-SA-REVIEW.md`（状态 `ACCEPTED_WITH_EXPLICIT_MODEL_ASSUMPTIONS`）对齐。早期版本使用的简单鸽巢论证已被该审计判定无效并从本文件移除。
+
+**性质定义。** 在固定 Witness 集合 `N=4`、`Q=3`、最多 `f≤1` Byzantine Witness 的模型下，同一 `lock_key=(chain_id,set_id,epoch)` 下、两个不同 `digest` 的冲突 checkpoint 不可能同时形成满足当前协议规则的有效 QC。其中：冲突指同一 `lock_key` 而 `digest` 不同——不同 `epoch` 或不同 `set_id` 的 checkpoint **不是**冲突，本性质不适用；有效 QC 需要 3 个不同 Witness 对同一 `round`、同一完整 checkpoint 的有效 PRECOMMIT；本结论依赖 honest Witness 遵守状态机规则（§1）。
+
+**假设与前提。**
+
+- `N=4`、`Q=3`、`f≤1`，`witness_set` 固定，按 Witness 身份等权计数（非按权重）。
+- 签名不可伪造；摘要与绑定字段抗碰撞。
+- honest Witness 遵守 S1、R-PREVOTE、R-PRECOMMIT、R-LOCK、R-ROUND（STATE-MACHINE §1–§3）。
+- PRECOMMIT 要求本轮已对同一 checkpoint PREVOTE，并观察到精确同轮 PoLC（`r_p == r`，STATE-MACHINE §2.4）。
+- PoLC 必须绑定同一 `lock_key`，且解锁时目标 digest 与当前锁冲突（STATE-MACHINE §3.1/§3.2）。
+- `durable_lock` 与 `signed_votes` 的恢复语义依赖 CRASH-ANALYSIS §0 所述抽象持久化原语；本设计未验证任何具体存储实现。
+
+**G1/G2/G3 的准确处理。**
+
+- **G1（规格表达缺口）**：STATE-MACHINE §2.3 的外部 PoLC 验证清单未逐项写出"PoLC 的 `lock_key` 与本地锁绑定相等"检查；虽然 §3.1/§3.2 已定义这些语义要求，本证明把它们作为**前提**，**不声称已有独立实现验证**。
+- **G2（外部实现前提）**：PRECOMMIT 的锁写入与签名证据原子持久化依赖 `durable_write` / `atomic_write_two` 等抽象原语；本设计**没有验证**任何具体存储实现满足这些原语。
+- **G3（可推导状态性质）**：`locked_round` 单调不减**不是额外引入的新协议规则**，可由现有规则推导：`current_round` 单调推进（R-ROUND）；锁更新发生在当前轮；冲突锁转移要求 `locked_round < polc_round < current_round`（R-LOCK）；结合不变量 `locked_round ≤ current_round`，锁轮次不会倒退。该推导仅为书面规则层推导，**不是**已实现或机器验证的事实。
+
+**论证（正式证明，跨轮与同轮分列）。**
+
+*第一步：旧鸽巢论证为何无效。* 两个 3-of-4 quorum 的交集至少为 2，但 `f≤1` 只能保证交集中至少 **1 个**诚实 Witness，不能保证至少 2 个诚实 Witness。并且 S1 只禁止同轮双签，跨轮改签必须由 R-LOCK 分析。因此早期版本"至少两个诚实双签者"的鸽巢推理无效，不能作为本性质依据。
+
+*第二步：反设两个冲突 QC，固定较早者为锚点。* 反设 `QC(A,r_A)` 与 `QC(B,r_B)` 同时成立，A、B 同一 `lock_key`、digest 不同。同轮情况在第七步单独处理；跨轮时不失一般性令 `r_A < r_B`，固定较早的 `QC(A,r_A)` 为唯一锚点。
+
+*第三步：定义相对锚点的最小冲突 PoLC。* 令
+
+```
+s = min{ ρ > r_A : 存在 D，D.digest ≠ A.digest、同 lock_key，且 PoLC(D,ρ) 成立 }
+```
+
+这是相对 A 的最小冲突 PoLC，**不是**全局最早冲突 PoLC。集合非空：较晚 `QC(B,r_B)` 中至少有诚实 PRECOMMIT，诚实 PRECOMMIT 要求精确同轮 `PoLC(B,r_B)`，且 `r_B > r_A`、`B.digest ≠ A.digest`，故 `r_B` 属于该集合。因而 `r_A < s ≤ r_B`。
+
+*第四步：构造两个 quorum 并取交集。* `QC(A,r_A)` 的 PRECOMMIT 签名者集合至少 3，其中至少 2 个诚实 Witness（由 R-PRECOMMIT 动作，它们已在 `r_A` 锁定 A）；`PoLC(D,s)` 的 PREVOTE 签名者集合至少 3。两集合交集至少 2（`3+3−4=2`），由 `f≤1` 交集中至少 **1 个**诚实 Witness，记为 W。W 在 `r_A` 已锁 A，却在 s 对与 A 冲突的 D PREVOTE。
+
+*第五步：使用第一次离开 A 的转移。* W 诚实且在 s 为冲突 digest PREVOTE，必须满足 R-LOCK。若 W 在 `r_A` 与 s 之间经过多个中间 digest 转移，取**第一次从 A 离开**的转移：离开前 W 仍锁定 A（`locked_digest = A.digest`），故该次 PoLC 目标必与 A.digest 冲突。由于 W 在 `r_A` 已锁 A、`locked_round` 不倒退故第一次离开时 `locked_round ≥ r_A`、R-LOCK 要求 `locked_round < p_1 < current_round_1`、且该次转移受最终 s 轮约束故 `current_round_1 ≤ s`，得到
+
+```
+r_A ≤ locked_round < p_1 < current_round_1 ≤ s
+```
+
+因此 `r_A < p_1 < s`。这给出一个轮次严格位于 `(r_A,s)`、且相对 A 冲突的 PoLC。
+
+*第六步：导出最小性矛盾。* `p_1` 属于 s 的定义集合却满足 `p_1 < s`，与 s 的最小性矛盾。故跨轮情况下两个冲突 QC 不可能同时成立。
+
+*第七步：同轮情况。* 若两个冲突 QC 位于同一轮 r，各自要求同轮精确 PoLC；两个 3-of-4 PREVOTE 集合交集至少 2，其中至少 1 个诚实 Witness，该 Witness 必须在同一轮对两个冲突 digest PREVOTE，违反 S1。故同轮冲突 QC 也不可能。
+
+综上，反设不成立，S-A 得证。
+
+**失败边界。**
+
+- 若签名可伪造、`f≥2`、honest 节点违反 S1/R-LOCK/R-PRECOMMIT/R-ROUND、或持久化丢失导致节点忘记已签事实（AL1），论证失效。
+- G1 的实现若漏检 `lock_key` 绑定、G2 的持久化原语若不成立，前提被破坏，结论不再保证。
+- 本论证不覆盖异质投票权模型（若引入权重，`Q=3` 与 `f=1` 的计数关系需重证）。
+
+**P1 覆盖。** P3-B（冲突 PoLC 不可达）、R1-B1–B8、U1（timeout 解锁反例，S2 失败）提供具体状态机行为与反例边界的**结构性证据**；P1 模拟器测试**不能**替代上述数学论证，也**不能**作为 BFT soundness 证明。
+
+**证据标签。** `PROOF_SUPPORTED`：在当前书面状态机规则、模型假设及外部持久化前提下，S-A 得到规则层数学论证支持。这是**人工审计的数学推导，不是机器检查的形式化证明**；不引用原鸽巢论证，不声称对应完整 CometBFT Proof of Safety，不声称已验证 crash-safe 存储，不声称 QC/PoLC 证明 globally latest。
 
 ### S-B：诚实 Witness 不违反锁转移规则
 
@@ -97,7 +150,7 @@ Gateway 收到 QC 后，按以下顺序验证。**顺序不可调换**：前置�
 | 标签 | 含义 | 本文件适用处 |
 | --- | --- | --- |
 | 已由 P1 模拟器验证 | `results/p1_p10.json` 有对应事件与决策 | S-B/S-C/S-D、L-B 的 P1 列 |
-| 由协议规则推导 | 来自状态转换定义 | S-A、L-A 的论证 |
+| 由协议规则推导 | 来自状态转换定义；S-A 另经独立数学审计对齐（见 `SA-REVIEW.md`），为人工推导、非形式化，P1 仅作结构性辅助证据 | S-A（`PROOF_SUPPORTED`）、L-A 的论证 |
 | 仍依赖外部假设 | honest quorum、GST、持久化、配置来源、解锁 quorum | 所有 Safety/Liveness 的失败边界 |
 | 当前无法证明 | BFT soundness、globally latest、crash-safe、完整轮换 | §4.1、§6 |
 
