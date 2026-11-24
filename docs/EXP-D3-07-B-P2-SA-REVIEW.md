@@ -206,8 +206,8 @@ locked_round_i < polc_round_i < current_round_i
 
 `locked_round` 单调不减（G3），故每个 `polc_round_i` 严格位于上一锁轮次与该次转移的 `current_round_i` 之间。关键在**第一次从 A 解锁**：
 
-- 第一次转移前 `W` 仍锁 A（`locked_round = r_A, locked_digest = A.digest`），R-LOCK 要求该次 PoLC 目标 `D2 ≠ A.digest`，即它本身就是一个**相对 A 的冲突 PoLC**——不是仅相对某个中间锁；
-- 其轮次 `p_1` 满足 `r_A < p_1 < current_round_1 ≤ s`（最终要在 s 为冲突 digest prevote，所有转移都在 s 之前完成）。
+- 第一次转移前 `W` 仍锁定 A（`locked_digest = A.digest，locked_round ≥ r_A`），R-LOCK 要求该次 PoLC 目标 `D2 ≠ A.digest`，即它本身就是一个**相对 A 的冲突 PoLC**——不是仅相对某个中间锁；
+- 其轮次 `p_1` 满足 `r_A ≤ locked_round < p_1 < current_round_1 ≤ s`（R-LOCK 要求 `locked_round < p_1`，且 `locked_round ≥ r_A`；最终要在 s 为冲突 digest prevote，所有转移都在 s 之前完成，故 `current_round_1 ≤ s`），由此严格得出 `r_A < p_1 < s`。
 
 因此第一次转移就给出一个满足 `r_A < p_1 < s` 的相对 A 冲突 PoLC，属于 `s` 定义集合且 `p_1 < s`，与 s 最小性直接矛盾。后续转移只是产生更多 `(r_A,s)` 内的冲突 PoLC，**不能**绕过第一次转移所需的那个 PoLC。多次转移**不会**使证明失效。这回答了逻辑自检第 6、7 项：PoLC 必与锚点 A 冲突（因第一次转移时锁目标就是 A），中途多次转移不能跳过第一次冲突转移。
 
