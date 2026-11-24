@@ -12,6 +12,7 @@
 //! `docs/d3_03_a_circuit_notes.md`.  A matching SHA-256 / Poseidon root is NOT
 //! by itself a cryptographic semantic proof.
 
+pub mod anchor;
 pub mod encoding;
 pub mod event;
 pub mod grant_tree;
