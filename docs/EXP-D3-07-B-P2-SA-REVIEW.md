@@ -4,7 +4,7 @@
 > 基线分支 `exp-d3-07-b-p2-design` @ `b18a0c6`。
 > 本轮不修改任何现有文档、不改协议规则、不实现代码、不进 P3。
 >
-> **最终结论：`PROOF_SUPPORTED`（带关键前提与一处规格歧义标注）。** 原 S-A 的鸽巢表述不成立；改用"最早冲突事件归纳"后论证成立，但成立依赖当前规则中几条常被忽略的绑定条件（PoLC 必须绑定 chain_id/set_id/epoch、round 进入签名体、PRECOMMIT 要求同轮精确 PoLC、honest 遵守 S1）。这是规则层推导，不是机器检查的形式化证明。
+> **最终结论：`PROOF_SUPPORTED`（带关键前提与一处规格歧义标注）。** 原 S-A 的鸽巢表述不成立；改用"固定较早 QC 锚点的首个冲突 PoLC 归纳"后论证成立，但成立依赖当前规则中几条常被忽略的绑定条件（PoLC 必须绑定 chain_id/set_id/epoch、round 进入签名体、PRECOMMIT 要求同轮精确 PoLC、honest 遵守 S1）。这是规则层推导，不是机器检查的形式化证明。
 
 ---
 
@@ -81,17 +81,30 @@ QC(D, r') 成立 ⟹ 存在 (r', D) 的 PoLC
 
 **回答任务包 B 的首问：是，必须先证明冲突 PoLC 不可能（或等价地证明其无法达到 3 票），才能推出冲突 QC 不可能。** 直接对 QC 签名集合做鸽巢是走不通的。
 
-### 3.2 归纳设置
+### 3.2 归纳设置（固定较早 QC 为锚点）
 
-反设存在两个冲突 QC：`QC(C, r0)` 与 `QC(C', r1')`，`C.digest ≠ C'.digest`、同 `lock_key`。不妨设 `r0 ≤ r1'`（否则交换记号）。
-
-由于 `QC(C,r0)` 成立，存在 `S_pc = {W : W 对 (r0,C) 签 PRECOMMIT}`，`|S_pc| ≥ 3`。由 `f≤1`，`S_pc` 中至少 2 个 honest，且由 R-PRECOMMIT 动作，这些 honest 在签名前已写 `durable_lock=(r0, C.digest)`，即**已锁定 C，locked_round = r0**。
-
-定义"冲突 PoLC"：针对某个 `D ≠ C.digest`、同 `lock_key` 的 PoLC。反设存在至少一个冲突 PoLC；取其中**轮次最早**者，记其轮次为 `r1`：
+反设存在两个冲突 QC：
 
 ```
-r1 = min{ ρ : 存在针对 D≠C.digest 的 PoLC at round ρ }
+QC(A, r_A),  QC(B, r_B),   A.digest ≠ B.digest,  同 lock_key
 ```
+
+不失一般性令 `r_A < r_B`（若 `r_A = r_B` 见 §3.4 的同轮分支；若记号相反则交换 A/B）。**固定较早 QC 的 checkpoint A 与轮次 r_A 为唯一锚点。**
+
+> 符号对照：下文 §3.3–§3.8 沿用的 `C` 即锚点 `A`，`r0` 即 `r_A`，`C'` 即较晚 `B`，`r1'` 即 `r_B`；旧稿的 `r1`（全局最小冲突 PoLC）在本版改为 `s`（相对锚点的最小冲突 PoLC）。
+
+由于 `QC(A,r_A)` 成立，存在 `S_pc = {W : W 对 (r_A,A) 签 PRECOMMIT}`，`|S_pc| ≥ 3`。由 `f≤1`，`S_pc` 中至少 2 个 honest，且由 R-PRECOMMIT 动作，这些 honest 在签名前已写 `durable_lock=(r_A, A.digest)`，即**已锁定 A，locked_round = r_A**。
+
+**关键修正——相对锚点定义首个冲突 PoLC**：定义"相对 A 的冲突 PoLC"为针对某个 `D`、满足 `D.digest ≠ A.digest`、同 `lock_key`、且轮次严格晚于锚点的 PoLC。令
+
+```
+s = min{ ρ > r_A : ∃ D, D.digest ≠ A.digest, 同 lock_key, PoLC(D, ρ) }
+```
+
+- 最小性**只相对于固定锚点 r_A**，不是全局最小；不必处理"冲突 PoLC 早于锚点"的情形（那类 PoLC 若存在，轮次 `≤ r_A`，与本 S-A 要排除的"两个 QC 并存"无关）。
+- `D` 可以是**任意**与 A 冲突的 digest，**不要求** `D = B.digest`；允许经过任意数量的中间 digest（见 §3.8）。
+
+**集合非空性**：`QC(B,r_B)` 成立，按 R-PRECOMMIT(c)，其每份诚实 PRECOMMIT 都要求 `(r_B,B)` 的精确同轮 PoLC；又 `B.digest ≠ A.digest` 且 `r_B > r_A`，故 `ρ = r_B` 属于上述集合。集合非空，最小值 `s` 存在，且 `r_A < s ≤ r_B`。
 
 ### 3.3 步骤 1：r0 处有 ≥2 honest 锁定 C（成立）
 
@@ -99,44 +112,59 @@ r1 = min{ ρ : 存在针对 D≠C.digest 的 PoLC at round ρ }
 
 **成立**，但依赖：PRECOMMIT 的"先写锁再返回签名"顺序（STATE-MACHINE §2.4 动作、§3.5）。若实现把写锁放到签名之后，此步失效（见 §8 缺口 G2）。
 
-### 3.4 步骤 2：最早的冲突 PoLC at r1 与 r0 的关系
+### 3.4 轮次分支讨论（新定义下）
 
-冲突 PoLC 可能出现在 `r1 < r0`、`r1 = r0`、`r1 > r0`。用户给定路线的步骤 4–7 隐含假设 `r1 > r0`（因为要比较"在 r0 已锁定"的 Witness 是否在 r1 改签）。**这是路线的关键分支点，必须分情况**：
+本版把首个冲突 PoLC 定义为 `s = min{ρ > r_A : …}`（§3.2），因此**"冲突 PoLC 早于或同于锚点"（旧稿的 `r1 ≤ r0`）已由定义域直接排除**：凡轮次 `≤ r_A` 的冲突 PoLC 都不属于该集合，也不参与归纳。需要讨论的只是两个 QC 自身的轮次关系：
 
-- **情况 A：`r1 < r0`。** 冲突 PoLC 早于 C 的 QC。此时"在 r0 已锁定 C 的 honest Witness"尚未锁定（它们锁定发生在 r0），步骤 4 的前提不成立。但这不构成对 S-A 的威胁：S-A 关心的是**同时存在**两个冲突 QC；若 C 已在 r0 commit，则任何冲突 QC 必须出现在 `r' > r0`（同轮 r'=r0 见 §3.6）。`r1<r0` 的冲突 PoLC 最多导致 r0 之前的冲突 commit，与 `QC(C,r0)` 并存时，取较早的 QC 重做归纳即可（见 §3.7）。所以可**不失一般性地归结到情况 C**。
-- **情况 B：`r1 = r0`。** 同轮冲突 PoLC，见 §3.6，由 S1 排除。
-- **情况 C：`r1 > r0`。** 主归纳，见 §3.5。
+- **分支 1（跨轮，`r_A < r_B`）**：主归纳。由 §3.2 非空性，`s` 存在且 `r_A < s ≤ r_B`；§3.5 完成矛盾推导。
+- **分支 2（同轮，`r_A = r_B`）**：两个同轮冲突 QC 各要求同轮冲突 PoLC；由 S1 + `f≤1` 排除，见 §3.6（其结论同时覆盖同轮冲突 QC）。
 
-**判定**：用户路线在 `r1 > r0` 的分支成立；`r1 ≤ r0` 需要补充分支（情况 A 的归纳重选、情况 B 的 S1 排除），不能直接跳过。这是原路线的**缺失分支**，不是证明错误。
+**为什么"锚点之前存在冲突 PoLC"不构成漏洞**：本证明要否定的是"两个冲突 QC 并存"。既然锚点取的是两个 QC 中**较早**者 `r_A`，那么任何与 A 冲突且轮次 `≤ r_A` 的 PoLC 最多只能导致 `r_A` 之前的冲突 commit——但那与"锚点 QC 是最早的那个"这一取法相容：若真有更早的冲突 QC，我们本应把它选作锚点。因此以较早 QC 为锚点 + `ρ > r_A` 的定义域，**无需**再像旧稿那样补 `r1 < r0` 的归纳（原 §3.7 的补归纳随之删除，见新版 §3.7）。
 
-### 3.5 步骤 3–7：r1 > r0 主归纳
+**判定**：新定义把旧稿的"缺失分支"化归为定义域约束，不是靠直觉跳过；跨轮由 §3.5、同轮由 §3.6 分别闭合。
 
-`r1` 处存在针对 `D ≠ C.digest` 的 PoLC，即集合 `S_prev = {W : W 对 (r1,D) 签 PREVOTE}`，`|S_prev| ≥ 3`。
+### 3.5 主归纳：跨轮分支（r_A < s ≤ r_B）的完整矛盾推导
 
-**(3) 交集**：`|S_prev ∩ S_pc| ≥ 3+3−4 = 2`（成立）。
+按 §3.2，`s` 处存在针对 `D ≠ A.digest`、同 `lock_key` 的 PoLC，即集合 `S_prev = {W : W 对 (s,D) 签 PREVOTE}`，`|S_prev| ≥ 3`。逐步推导任务包 §3.2 的九步：
 
-**(4) 交集中 ≥1 honest**：`f≤1` → ≥1 honest Witness `Wh ∈ S_prev ∩ S_pc`（成立）。`Wh` 在 r0 已锁定 C（`locked_round=r0, locked_digest=C.digest`），且在 r1 为冲突 `D` 签了 PREVOTE。
+**(1) `QC(A,r_A)` 含 3 个不同 Witness 的有效 PRECOMMIT。** 由 R-QC（STATE-MACHINE §2.5），`|S_pc| ≥ 3`，同一 `r_A`、同一完整 `A`。
 
-**(5) `Wh` 解锁所需的中间 PoLC**：`Wh` honest 且遵守 R-PREVOTE(c2)，它在 r1 为冲突 digest `D` prevote 的前提是走 R-LOCK：
+**(2) 至少 2 个来自诚实 Witness。** 由 `f≤1`，3 份 PRECOMMIT 中最多 1 份来自 Byzantine，故 ≥2 份来自 honest。
+
+**(3) 这 ≥2 honest 已在 r_A 锁定 A。** 由 R-PRECOMMIT 动作"先写 `durable_lock=(r_A,A.digest)` 再返回签名"，这些 honest 的 `locked_round=r_A, locked_digest=A.digest`。（依赖外部持久化原语；见 §7.2 缺口 G2。）
+
+**(4) `PoLC(D,s)` 含 3 个不同 Witness 的有效 PREVOTE。** 由 R-PoLC，`|S_prev| ≥ 3`，同一 `s`、同一 `D.digest`、同 `lock_key`，按 `(witness,binding)` 去重（§2.3）。
+
+**(5) 两集合交集 ≥2、其中 ≥1 honest。** `|S_prev ∩ S_pc| ≥ 3+3−4 = 2`；由 `f≤1`，其中至少 1 个诚实 Witness，记为 `W`。
+
+**(6) W 在 r_A 已锁 A，却在 s 为冲突 D 签了 PREVOTE。** `W ∈ S_pc` → 由 (3) 它在 r_A 锁定 A；`W ∈ S_prev` → 它在 s 为 `D≠A.digest` 签 PREVOTE。由于 `s > r_A`，这是**跨轮**改签冲突 digest。
+
+**(7) W 解锁必须有一个严格位于 `(r_A, s)` 的冲突 PoLC。** `W` honest 且守 R-PREVOTE(c2)：它在 s 为冲突 digest prevote 的前提是走 R-LOCK，存在某个 PoLC，其轮次 `p` 满足
 
 ```
-locked_round(r0) < polc_round < current_round(r1)
+locked_round < p < current_round
 ```
 
-且该 PoLC 绑定同一 `(chain_id,set_id,epoch)`、目标为冲突 digest。因此存在一个针对某 `D* ≠ C.digest`、同 `lock_key` 的 PoLC，轮次 `polc_round` 满足
+逐项代入：
+- `current_round = s`：由 R-PREVOTE(a)，prevote 请求轮次必须等于 `current_round`；`W` 在 s prevote 且签名不隐式抬轮（R-ROUND/S6），故 `current_round = s`。
+- `locked_round = r_A`（或更大）：`W` 在 r_A 锁定 A。若 r_A 与 s 之间 `W` 合法改锁到别的 digest，`locked_round` 只会**单调增大**（R-LOCK 的 `p > locked_round` 蕴含）仍 ≥ r_A（见 §3.8、§7.2 缺口 G3）；无论哪种，`p < current_round = s` 给出 `p < s`。
+- 目标冲突性：R-LOCK 要求该 PoLC 目标 `D*` 与 `W` 当前锁目标不同。若 `W` 仍锁 A，则 `D* ≠ A.digest`；若中途改锁到 `D2`，则从 A 的第一次解锁已需要一个针对 `D*≠A.digest` 的 PoLC（见 §3.8）。
+
+因此存在一个针对某 `D* ≠ A.digest`、同 `lock_key` 的 PoLC，轮次 `p` 满足**严格不等式**
 
 ```
-r0 < polc_round < r1
+r_A ≤ locked_round < p < s,    即    r_A < p < s
 ```
 
-**逐步核对**：
-- `current_round = r1`：由 R-PREVOTE(a)，prevote 请求轮次必须等于 `current_round`；`Wh` 在 r1 prevote，故其 `current_round=r1`。
-- `locked_round = r0`：由步骤 1，`Wh` 在 r0 precommit 后锁定 C。需假设 r0 与 r1 之间 `Wh` 未合法改锁到别的冲突 digest；即便改锁，`locked_round` 只会**单调增大**，仍 ≥ r0，不等式 `locked_round < polc_round < r1` 给出的中间 PoLC 轮次仍 `< r1`，不影响矛盾（见 §3.8）。
-- `D* 与 C 冲突`：R-LOCK 要求 PoLC 目标为"冲突 digest"，即相对于 `Wh` 的锁目标不同。若 `Wh` 仍锁 C，则 `D*≠C.digest`。若 `Wh` 中途改锁到 `D2`，则 `D*≠D2`；此时 `Wh` 需要**两次**解锁，第一次（从 C 解锁）已经需要一个 `r0 < polc'_round < r1` 的冲突 PoLC——矛盾同样成立。
+**(8) 存在轮次更早、但仍晚于锚点的冲突 PoLC。** 上一步的 `PoLC(D*,p)` 满足 `p < s` 且 `p > r_A`，即它是集合 `{ρ > r_A : 相对 A 的冲突 PoLC}` 中一个比 `s` 更小的元素。注意这里是**更早的冲突 PoLC**，不是更早的 QC。
 
-**(6) 矛盾**：`polc_round` 满足 `r0 < polc_round < r1`，且针对 `D*≠C.digest`、同 `lock_key` —— 这是一个轮次**严格小于 r1** 的冲突 PoLC，与 `r1` 是冲突 PoLC 的最小轮次矛盾。∎
+**(9) 与 s 的最小性矛盾。** `s` 是该集合的最小值，但 (8) 给出 `p < s` 且 `p` 属于该集合，矛盾。故反设"存在两个冲突 QC"不成立：
 
-**判定**：步骤 (3)(4)(5)(6) 在当前规则下逐条成立。前提 (5) 依赖"honest Witness 改签冲突 digest 必须先有满足严格不等式的 PoLC"这条规则确实存在（R-LOCK / STATE-MACHINE §2.2c2、§3.1），已核对无误。
+```
+¬∃ 两个冲突 QC(A,r_A), QC(B,r_B) 且 A.digest ≠ B.digest
+```
+
+**判定**：步骤 (1)–(9) 在当前规则下逐条成立，(7) 的严格不等式 `r_A < p < s` 来自 R-LOCK 的 `locked_round < polc_round < current_round` 与 `current_round = s`。依赖点：R-LOCK/R-PREVOTE(c2) 确实存在（STATE-MACHINE §2.2c2、§3.1，已核对）、`locked_round` 单调性（G3）、PRECOMMIT 先写锁（G2）。这些均已标注，未被伪装成已实现事实。∎
 
 ### 3.6 同轮情况（任务包 B 必答）
 
@@ -152,13 +180,23 @@ r0 < polc_round < r1
 
 **判定**：同轮冲突 PoLC / QC 由 S1 排除，成立。
 
-### 3.7 情况 A 的补归纳（r1 < r0）
+### 3.7 锚点选择的严格性（替换旧稿"情况 A 补归纳"）
 
-若最早的冲突 PoLC 早于 `QC(C,r0)`：S-A 要排除的是"两个冲突 QC 并存"。取两个冲突 QC 中轮次**较早**的那个作为新的锚点 `C0`，把 `C` 换成 `C0` 重做 §3.5 的归纳：较晚的 QC 要求一个"晚于较早 QC 轮次"的冲突 PoLC，而该 PoLC 又要求更早的冲突 PoLC，递归下降到最小冲突 PoLC，由 §3.5 矛盾。**结论与锚点选择无关。** 故此分支不影响 S-A。
+旧稿用全局最早冲突 PoLC 作归纳对象，被迫补一个 `r1 < r0` 的递归分支。本版改为**固定较早 QC 为锚点**，需独立说明这一步无损且闭合：
+
+**(a) 锚点总是存在且可排序。** 反设 S-A 的否定命题成立，即存在一对冲突 QC。轮次是全序，故这对 QC 的轮次必可比较：要么 `r_A < r_B`，要么 `r_A = r_B`。前者进入 §3.5 主归纳，后者由 §3.6（S1）排除。总能取轮次较早（或同轮中任一）的 QC 作锚点 A。
+
+**(b) 取较早 QC 为锚点不损失一般性。** S-A 要否定的是"存在任意一对冲突 QC"。对这样一对中的**每一对**，我们都按其较早者重新锚定并重跑 §3.5；证明对 A、B 的具体取值没有任何假设（只用 R-QC/R-PRECOMMIT/R-PoLC/R-LOCK/S1），故对每一对都成立。因此"固定较早者"是对任意反例的统一处理，不是对反例集合的限制。
+
+**(c) 较晚 QC 提供集合非空的证据。** 正因为锚点取较早者，`r_B > r_A` 自动成立，由 R-PRECOMMIT(c) 得 `PoLC(B,r_B)` 是集合 `{ρ > r_A : 相对 A 的冲突 PoLC}` 的元素（§3.2）。若反过来取较晚者为锚点，则该证据会落到锚点之前、集合为空，归纳无法启动——这正是旧稿全局最小定义需要补分支的根因。
+
+**(d) 不再需要递归下降。** §3.5 第 (7)–(9) 步已直接从"W 在 s 改签冲突 digest"推出 `r_A < p < s` 的**更早冲突 PoLC**，与 s 的最小性一次矛盾，无需像旧稿那样递归到最小冲突 PoLC。多次中间 digest 转移（§3.8）只会产生更多 `(r_A, s)` 内的冲突 PoLC，不破坏这次矛盾。
+
+**判定**：锚点固定为较早 QC 是严格的；(a)–(d) 覆盖旧稿 §3.7 补归纳想处理的全部情形，且不再依赖"全局最早冲突 PoLC"这一过强、易错的前提。旧稿 §3.7 分支已删除。
 
 ### 3.8 跨轮多次转移（任务包 B 必答）
 
-**跨轮次解锁是否允许经过中间 digest 多次转移？** 允许。R-LOCK 只要求"PoLC 目标与当前锁目标冲突"，并未限定必须一步到位到最终 `D`。可以 `C → D2 → D3 → … → D`。
+**跨轮次解锁是否允许经过中间 digest 多次转移？** 允许。R-LOCK 只要求"PoLC 目标与当前锁目标冲突"，并未限定必须一步到位到最终 `D`。可以 `A → D2 → D3 → … → D`，其中每个中间 `Di ≠ A.digest`。
 
 **证明是否仍成立？** 成立。每次转移都触发一次 R-LOCK：
 
@@ -166,17 +204,26 @@ r0 < polc_round < r1
 locked_round_i < polc_round_i < current_round_i
 ```
 
-`locked_round` 单调不减，故 `polc_round_i` 均严格位于上一锁轮次与转移发生轮次之间。第一次从 C 解锁的 PoLC 轮次 `polc_round_1` 满足 `r0 < polc_round_1 < r1`（因为最终要在 r1 prevote，所有转移都在 r1 之前完成）。这仍与 `r1` 最小性矛盾。多次转移**不会**绕过归纳，反而每一步都生成一个更小的冲突 PoLC 轮次。
+`locked_round` 单调不减（G3），故每个 `polc_round_i` 严格位于上一锁轮次与该次转移的 `current_round_i` 之间。关键在**第一次从 A 解锁**：
+
+- 第一次转移前 `W` 仍锁 A（`locked_round = r_A, locked_digest = A.digest`），R-LOCK 要求该次 PoLC 目标 `D2 ≠ A.digest`，即它本身就是一个**相对 A 的冲突 PoLC**——不是仅相对某个中间锁；
+- 其轮次 `p_1` 满足 `r_A < p_1 < current_round_1 ≤ s`（最终要在 s 为冲突 digest prevote，所有转移都在 s 之前完成）。
+
+因此第一次转移就给出一个满足 `r_A < p_1 < s` 的相对 A 冲突 PoLC，属于 `s` 定义集合且 `p_1 < s`，与 s 最小性直接矛盾。后续转移只是产生更多 `(r_A,s)` 内的冲突 PoLC，**不能**绕过第一次转移所需的那个 PoLC。多次转移**不会**使证明失效。这回答了逻辑自检第 6、7 项：PoLC 必与锚点 A 冲突（因第一次转移时锁目标就是 A），中途多次转移不能跳过第一次冲突转移。
 
 ### 3.9 任务包 B 必答汇总
 
 | 问题 | 回答 |
 | --- | --- |
-| 需先证冲突 PoLC 不可能？ | 是。R-PRECOMMIT(c) 使冲突 QC 蕴含冲突 PoLC |
-| 存在同轮冲突 PoLC？ | honest 遵守规则时不存在 |
-| 同轮由哪条排除？ | S1（§1 不变量 + §2.2(b)），配合 f≤1 的交集 honest 下界 |
-| 跨轮可经中间 digest 多次转移？ | 允许；每步都需 R-LOCK PoLC |
-| 证明仍成立？ | 成立；多次转移只生成更多更小的冲突 PoLC 轮次 |
+| 需先证冲突 PoLC 不可能？ | 是。R-PRECOMMIT(c) 使冲突 QC 蕴含冲突 PoLC（§3.1） |
+| 归纳锚点如何取？ | 固定两个冲突 QC 中轮次较早者 `QC(A,r_A)`；较晚者 `r_B > r_A` 保证集合非空（§3.2、§3.7） |
+| 最小冲突 PoLC 的定义域？ | `s = min{ρ > r_A : 相对 A 的冲突 PoLC}`，严格限定 `ρ > r_A`，非全局最小（§3.2） |
+| 存在同轮冲突 PoLC / QC？ | honest 遵守规则时不存在（§3.6） |
+| 同轮由哪条排除？ | S1（§1 不变量 + §2.2(b)），配合 f≤1 的交集 honest 下界（§3.4 分支2、§3.6） |
+| 交集中为何 ≥1 honest？ | 两个 3-of-4 集合交 ≥2，f≤1 → ≥1 honest（§2(2)、§3.5 步骤5） |
+| 为何需 `(r_A,s)` 内的 PoLC？ | R-LOCK 的 `locked_round < p < current_round` 且 `current_round=s`、`locked_round≥r_A`（§3.5 步骤7，严格不等式） |
+| 跨轮可经中间 digest 多次转移？ | 允许；每步都需 R-LOCK PoLC，第一次从 A 解锁已需 `(r_A,s)` 内冲突 PoLC（§3.8） |
+| 证明仍成立？ | 成立；矛盾对象是**更早的冲突 PoLC**（非更早 QC），与 s 最小性冲突（§3.5 步骤8–9） |
 
 ---
 
@@ -258,7 +305,7 @@ locked_round_i < polc_round_i < current_round_i
 
 **判定：`PROOF_SUPPORTED`。**
 
-在 §1.3 固定假设下，当前 P2 状态机足以推出 S-A。成立的论证是 §3 的"最早冲突 PoLC 归纳"，核心计数为：一个 QC 使 ≥2 honest Witness 锁定 C → 任何冲突 PoLC 最多剩 2 票（`W4` + 至多 1 个未锁 honest）< `Q=3` → 冲突 PoLC 无法形成 → 冲突 QC 无法形成。原 S-A 的鸽巢表述（"≥2 honest 双签"）**不成立、已作废**，但不能据此得出协议不安全。
+在 §1.3 固定假设下，当前 P2 状态机足以推出 S-A。成立的论证是 §3 的"**固定较早 QC 锚点的首个冲突 PoLC 归纳**"：取两冲突 QC 中较早者 `QC(A,r_A)` 为锚点，定义 `s = min{ρ > r_A : 相对 A 的冲突 PoLC}`；核心计数为一个 QC 使 ≥2 honest Witness 锁定 A → 任何相对 A 的冲突 PoLC 最多剩 2 票（`W4` + 至多 1 个未锁 honest）< `Q=3`。若 `s` 处形成该 PoLC，交集必含一个已在 r_A 锁 A 的 honest W，它改签冲突 digest 又要求 `r_A < p < s` 的更早冲突 PoLC，与 s 最小性矛盾；同轮冲突由 S1 排除。故冲突 PoLC 无法形成 → 冲突 QC 无法形成。原 S-A 的鸽巢表述（"≥2 honest 双签"）**不成立、已作废**，但不能据此得出协议不安全。
 
 **这不是形式化证明**：是规则层数学推导 + 有限反例枚举，未经机器证明辅助；结论强度限于"在明确假设下、按当前书面规则可推出"。
 
