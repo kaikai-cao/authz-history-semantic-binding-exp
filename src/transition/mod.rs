@@ -23,6 +23,7 @@ pub mod e_r2_types;
 pub mod e_r3_stats;
 pub mod e_types;
 pub mod e_types_host;
+pub mod s0_consistency_v2;
 pub mod types;
 
 pub use b_circuit::{TransitionCircuitB, TransitionConfigB};
