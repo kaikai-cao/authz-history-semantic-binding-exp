@@ -1,22 +1,20 @@
-"""Four execution-evidence architectures under test (D3-13-01-R1).
+"""Four execution-evidence architectures under test (D3-13-01-R1.1).
 
-R1 changes (semantics + trust-boundary corrections; no new attack items):
+R1.1 changes on top of R1 (all finite, no new attacks, no new research):
 
-  * Applicability matrix is explicit (see runner.APPLICABLE). N/A arms are
-    recorded, never silently mapped onto a different attack.
-  * T5 is a REAL historical-response replay: a seed request mints one honest
-    response, stored verbatim; T5 re-emits that exact evidence (same nonce,
-    same signature) under a fresh grant/nonce and is rejected by current-request
-    binding. No "pre-consume the current nonce" shortcut remains.
-  * T10 models a tool failure that happens BEFORE query execution
-    (executed=False) followed by a forged success status.
-  * T4 executes the AUTHORIZED query but returns a different real result;
-    ground truth separates actual_query_result_digest from returned_output_digest
-    so result disclosure and ASR are counted independently.
-  * D is renamed Oracle-assisted Observer: it reads the DS execution record
-    from truth_shared, an explicitly-trusted TEST ORACLE side channel. This is
-    an ideal-condition upper bound, NOT a production independent observer, and
-    NOT a solution to H4.
+  * T1 vs T2 are now DIFFERENT real injection paths, recorded in ground truth:
+      T1 = post_authorization_executor_override: executor receives Sales, the
+           grant binding passes on Sales, then the executor overrides the actual
+           query to Finance before running it.
+      T2 = pre_executor_ingress_tamper: the request is already Finance when it
+           reaches the executor; the executor does NOT re-bind the real input.
+    Three query states + tamper_stage are written for every attempt.
+  * T10 signature-object bug fixed: the proxy now signs the SAME `forged`
+    payload it submits (previously it signed {"forged": True}), so Gateway
+    rejection is provably due to DS public-key verification, not a stray bug.
+  * gateway_verification_attempted is set by the ACTUAL execution path (never
+    inferred from `executed`). A response that reaches the Gateway verifier and
+    is rejected is class B (post-submission detection), NOT class A (prevention).
 
 Trust-boundary facts enforced in code (see ARCHITECTURE-COMPARISON.md):
   A Adapter Receipt       : adapter holds signing key, owns dataset, executes
@@ -30,7 +28,8 @@ Trust-boundary facts enforced in code (see ARCHITECTURE-COMPARISON.md):
                             from the trusted driver. Gateway pins ds_pk read
                             directly from DS and binds fields to the grant.
   D Oracle-assisted Obs.  : C plus an observer PROCESS reading the DS execution
-                            record from the trusted test-Oracle side channel.
+                            record from truth_shared, an explicitly-trusted
+                            TEST ORACLE side channel (ideal upper bound only).
 
 No Halo2 / no new proof system anywhere in this module.
 """
@@ -74,14 +73,29 @@ SUBSTITUTED_REAL_OUTPUT: list[dict[str, Any]] = [
     {"year": 2026, "department": "Finance", "amount": 3400}
 ]
 
+# R1.1 tamper-stage labels (single source of truth, used by truth + tests).
+STAGE_NONE = "none"
+STAGE_T1 = "post_authorization_executor_override"
+STAGE_T2 = "pre_executor_ingress_tamper"
+STAGE_COLLUSION = "collusion_ds_finance"
+STAGE_REPLAY = "historical_replay"
+STAGE_PRE_FAILURE = "pre_execution_failure"
+
 
 def _truth(run_id: str, role: str, executed: bool,
            where: dict[str, Any] | None,
            actual_result: list[dict[str, Any]] | None,
            returned_output: list[dict[str, Any]] | None,
-           note: str = "") -> dict[str, Any]:
-    """Adapter for the R1 enriched ground-truth builder."""
-    return build_truth(run_id, role, executed, where, actual_result, returned_output, note)
+           note: str = "",
+           *,
+           executor_input: dict[str, Any] | None = None,
+           tamper_stage: str = STAGE_NONE) -> dict[str, Any]:
+    """Adapter for the enriched ground-truth builder (R1.1 query provenance)."""
+    return build_truth(
+        run_id, role, executed, where, actual_result, returned_output, note,
+        executor_input_query_where=executor_input,
+        tamper_stage=tamper_stage,
+    )
 
 
 def _verify_grant_binding(
@@ -119,6 +133,10 @@ class Verdict:
     accepted: bool
     reason: str
     detected: bool  # Gateway/observer correctly flagged an anomaly
+    # R1.1: set by the REAL execution path. True iff the attack response entered
+    # the Gateway evidence-verification flow. Pre-execution denials set False.
+    # Never inferred from `accepted` or `executed`.
+    gateway_verification_attempted: bool = True
 
 
 def make_service_loop(
@@ -221,6 +239,7 @@ class ArchAAdapterReceipt:
 
     def _gateway(self, evidence: dict[str, Any] | None, output: list[dict[str, Any]],
                  nonce: str, request_id: str) -> Verdict:
+        # This function IS the Gateway evidence-verification flow.
         if evidence is None:
             return Verdict(False, "missing_evidence", True)
         p = evidence["payload"]
@@ -243,16 +262,22 @@ class ArchAAdapterReceipt:
             _verify_grant_binding(self.issuer_pk, grant, auth_call.as_dict(),
                                   DEMO_CONTEXT.as_dict())
         except AuthorizationError as exc:
+            # T11: denied before any query and before the Gateway verifier.
             return {"response": {"error": str(exc)},
-                    "truth": _truth(run_id, "adapter", False, None, None, None, str(exc)),
-                    "verdict": Verdict(False, str(exc), True), "observation": None}
+                    "truth": _truth(run_id, "adapter", False, None, None, None, str(exc),
+                                    executor_input=AUTHORIZED_WHERE,
+                                    tamper_stage=STAGE_NONE),
+                    "verdict": Verdict(False, str(exc), True,
+                                       gateway_verification_attempted=False),
+                    "observation": None}
 
         # T5: verbatim historical response (seed nonce/request_id/signature).
         if attack == "T5":
             assert self.seed_response is not None
             resp = copy.deepcopy(self.seed_response)
             t = _truth(run_id, "adapter", False, None, None, resp["output"],
-                       "T5: verbatim historical response replay, no new execution")
+                       "T5: verbatim historical response replay, no new execution",
+                       executor_input=AUTHORIZED_WHERE, tamper_stage=STAGE_REPLAY)
             v = self._gateway(resp["evidence"], resp["output"], nonce, request_id)
             return {"response": resp, "truth": t, "verdict": v, "observation": None}
 
@@ -262,28 +287,45 @@ class ArchAAdapterReceipt:
             p = self._payload(auth_call, fake, nonce, request_id)
             evidence = {"payload": p, "signature": self.adapter_signer.sign_b64(p)}
             t = _truth(run_id, "adapter", False, None, None, fake,
-                       "T10: pre-execution failure, adapter forged EXECUTED receipt")
+                       "T10: pre-execution failure, adapter forged EXECUTED receipt",
+                       executor_input=AUTHORIZED_WHERE, tamper_stage=STAGE_PRE_FAILURE)
             v = self._gateway(evidence, fake, nonce, request_id)
             return {"response": {"output": fake, "evidence": evidence},
                     "truth": t, "verdict": v, "observation": None}
 
-        # T1/T2: real unauthorized Finance query, receipt claims authorized Sales.
-        # T4: executes authorized Sales but returns a different REAL result.
-        # T12: honest.
-        honest = attack == "T12"
-        substitution = attack == "T4"
-        exec_call = auth_call if honest or substitution else make_call(FINANCE_WHERE)
+        # R1.1: T1 vs T2 different real injection paths.
+        #   T1: executor INPUT is the granted Sales; binding passes; then the
+        #       malicious executor overrides the actual query to Finance.
+        #   T2: executor INPUT is already Finance (tampered before ingress);
+        #       the malicious executor does NOT re-bind the real input.
+        # Both ultimately run the real Finance query and sign a Sales receipt.
+        if attack == "T1":
+            exec_call = make_call(FINANCE_WHERE)
+            exec_input = AUTHORIZED_WHERE
+            stage = STAGE_T1
+            note = "T1: Sales input passed binding, executor overrode to Finance"
+        elif attack == "T2":
+            exec_call = make_call(FINANCE_WHERE)
+            exec_input = FINANCE_WHERE
+            stage = STAGE_T2
+            note = "T2: Finance arrived at ingress, executor ran it without re-binding"
+        elif attack == "T4":
+            exec_call = auth_call  # authorized Sales really executed
+            exec_input = AUTHORIZED_WHERE
+            stage = STAGE_NONE
+            note = "T4: authorized Sales executed, different real Finance result returned"
+        else:  # T12 honest
+            exec_call = auth_call
+            exec_input = AUTHORIZED_WHERE
+            stage = STAGE_NONE
+            note = "honest authorized query"
+
         actual_output, probe = execute_query(exec_call, self.records)
-        returned = copy.deepcopy(SUBSTITUTED_REAL_OUTPUT) if substitution else actual_output
+        returned = copy.deepcopy(SUBSTITUTED_REAL_OUTPUT) if attack == "T4" else actual_output
         p = self._payload(auth_call, returned, nonce, request_id)
         evidence = {"payload": p, "signature": self.adapter_signer.sign_b64(p)}
-        note = {
-            "T1": "T1: real Finance query, self-consistent false receipt claims Sales",
-            "T2": "T2: tampered query parameter to Finance, evidence still claims Sales",
-            "T4": "T4: authorized Sales executed, different real Finance result returned",
-            "T12": "honest authorized query",
-        }.get(attack, "malicious adapter")
-        t = _truth(run_id, "adapter", True, probe["where"], probe["result"], returned, note)
+        t = _truth(run_id, "adapter", True, probe["where"], probe["result"], returned, note,
+                   executor_input=exec_input, tamper_stage=stage)
         v = self._gateway(evidence, returned, nonce, request_id)
         return {"response": {"output": returned, "evidence": evidence},
                 "truth": t, "verdict": v, "observation": None}
@@ -328,7 +370,7 @@ def _proxy_process(req_q: Any, resp_q: Any, issuer_pk: bytes, truth_shared: Any)
         attack, run_id = msg["attack"], msg["run_id"]
         grant = SignedGrant(msg["grant"]["payload"], msg["grant"]["signature"])
         auth_call = make_call()
-        # T11 (expired grant) denied before any query.
+        # T11 (expired grant) denied before any query and before Gateway.
         _verify_grant_binding(issuer_pk, grant, auth_call.as_dict(), DEMO_CONTEXT.as_dict())
         nonce = grant.payload["nonce"]
         request_id = msg.get("request_id", "")
@@ -357,7 +399,8 @@ def _proxy_process(req_q: Any, resp_q: Any, issuer_pk: bytes, truth_shared: Any)
             p["grant_hash"] = grant.grant_hash
             evidence = {"payload": p, "signature": signer.sign_b64(p)}
             t = _truth(run_id, "proxy", False, None, None, fake,
-                       "T10: pre-execution failure, proxy forged EXECUTED evidence")
+                       "T10: pre-execution failure, proxy forged EXECUTED evidence",
+                       executor_input=AUTHORIZED_WHERE, tamper_stage=STAGE_PRE_FAILURE)
             truth_shared[run_id] = t
             return {"ok": True, "output": fake, "evidence": evidence, "truth": t}
 
@@ -368,31 +411,49 @@ def _proxy_process(req_q: Any, resp_q: Any, issuer_pk: bytes, truth_shared: Any)
             p["grant_hash"] = grant.grant_hash
             evidence = {"payload": p, "signature": signer.sign_b64(p)}
             t = _truth(run_id, "proxy", False, None, None, fake,
-                       "T3: proxy self-signed fabricated evidence (trust-source issue)")
+                       "T3: proxy self-signed fabricated evidence (trust-source issue)",
+                       executor_input=AUTHORIZED_WHERE, tamper_stage=STAGE_NONE)
             truth_shared[run_id] = t
             return {"ok": True, "output": fake, "evidence": evidence, "truth": t}
 
         # T6 (B): field-tamper, NOT query tamper -- execute the AUTHORIZED query
         # and only rewrite the source_id/snapshot fields it signs with its key.
-        honest = attack == "T12"
-        substitution = attack == "T4"
-        # T1/T2 are the only B attacks that actually run an unauthorized query.
-        unauth_query = attack in ("T1", "T2")
-        exec_call = make_call(FINANCE_WHERE) if unauth_query else auth_call
+        # R1.1 T1/T2 distinction (same as A): both run Finance, but the recorded
+        # executor INPUT and tamper_stage differ.
+        if attack == "T1":
+            exec_call = make_call(FINANCE_WHERE)
+            exec_input = AUTHORIZED_WHERE
+            stage = STAGE_T1
+            note = "T1: Sales input passed binding, proxy overrode to Finance"
+        elif attack == "T2":
+            exec_call = make_call(FINANCE_WHERE)
+            exec_input = FINANCE_WHERE
+            stage = STAGE_T2
+            note = "T2: Finance arrived at ingress, proxy ran it without re-binding"
+        elif attack == "T4":
+            exec_call = auth_call
+            exec_input = AUTHORIZED_WHERE
+            stage = STAGE_NONE
+            note = "T4: authorized Sales executed, different real Finance result returned"
+        elif attack == "T6":
+            exec_call = auth_call
+            exec_input = AUTHORIZED_WHERE
+            stage = STAGE_NONE
+            note = "T6: proxy tampered source_id then self-signed with its own key"
+        else:  # T12
+            exec_call = auth_call
+            exec_input = AUTHORIZED_WHERE
+            stage = STAGE_NONE
+            note = "honest authorized query"
+
         actual_output, probe = execute_query(exec_call, records)
-        returned = copy.deepcopy(SUBSTITUTED_REAL_OUTPUT) if substitution else actual_output
+        returned = copy.deepcopy(SUBSTITUTED_REAL_OUTPUT) if attack == "T4" else actual_output
         src = "attacker-source" if attack == "T6" else SOURCE_ID
         p = payload(auth_call, returned, nonce, request_id, source_id=src)
         p["grant_hash"] = grant.grant_hash
         evidence = {"payload": p, "signature": signer.sign_b64(p)}
-        note = {
-            "T1": "T1: real Finance query, self-signed evidence claims Sales",
-            "T2": "T2: tampered query to Finance, evidence claims Sales",
-            "T4": "T4: authorized Sales executed, different real Finance result returned",
-            "T6": "T6: proxy tampered source_id then self-signed with its own key",
-            "T12": "honest authorized query",
-        }.get(attack, "malicious proxy")
-        t = _truth(run_id, "proxy", True, probe["where"], probe["result"], returned, note)
+        t = _truth(run_id, "proxy", True, probe["where"], probe["result"], returned, note,
+                   executor_input=exec_input, tamper_stage=stage)
         truth_shared[run_id] = t
         return {"ok": True, "output": returned, "evidence": evidence, "truth": t}
 
@@ -424,6 +485,7 @@ class ArchBIndependentProxy:
 
     def _gateway(self, evidence: dict[str, Any] | None, output: list[dict[str, Any]],
                  nonce: str, request_id: str) -> Verdict:
+        # This function IS the Gateway evidence-verification flow.
         if evidence is None:
             return Verdict(False, "missing_evidence", True)
         p = evidence["payload"]
@@ -446,8 +508,10 @@ class ArchBIndependentProxy:
         resp = self.proc.call({"attack": attack, "run_id": run_id,
                                "grant": grant.as_dict(), "request_id": request_id})
         if not resp.get("ok"):
-            return {"response": resp, "truth": None,
-                    "verdict": Verdict(False, resp.get("error", "proxy_denied"), True),
+            # Denied inside proxy before reaching the Gateway verification flow.
+            return {"response": resp, "truth": resp.get("truth"),
+                    "verdict": Verdict(False, resp.get("error", "proxy_denied"), True,
+                                       gateway_verification_attempted=False),
                     "observation": None}
         output, evidence = resp["output"], resp["evidence"]
         v = self._gateway(evidence, output, nonce, request_id)
@@ -459,7 +523,7 @@ class ArchBIndependentProxy:
 
 
 # ---------------------------------------------------------------------------
-# C Signed Data Service (DS owns key+dataset; proxy is pure relay)
+# C Signed Data Service (DS owns key+dataset; proxy pure relay)
 # applies: T2 T3 T4 T5 T6 T7 T8 T9 T10 T11 T12
 # ---------------------------------------------------------------------------
 
@@ -503,7 +567,8 @@ def _ds_process(req_q: Any, resp_q: Any, issuer_pk: bytes, truth_shared: Any) ->
         # T10: tool fails BEFORE execution; DS writes executed=False and no evidence.
         if attack == "T10":
             t = _truth(run_id, "data_service", False, None, None, [],
-                       "T10: pre-execution tool failure, DS did not execute")
+                       "T10: pre-execution tool failure, DS did not execute",
+                       executor_input=AUTHORIZED_WHERE, tamper_stage=STAGE_PRE_FAILURE)
             truth_shared[run_id] = t
             return {"ok": True, "status": "FAILED", "output": [], "evidence": None, "truth": t}
 
@@ -516,11 +581,26 @@ def _ds_process(req_q: Any, resp_q: Any, issuer_pk: bytes, truth_shared: Any) ->
             p = sign_payload(msg["query_digest_hint"], claimed, request_id,
                              grant.grant_id, nonce)
             note = "T9: colluding DS ran Finance, signed authorized-query digest"
+            exec_input = FINANCE_WHERE
+            stage = STAGE_COLLUSION
         else:
             # DS re-verifies the grant against the query it is asked to run.
             # T2: proxy rewrote the query to Finance -> DS rejects pre-execution.
             asked = make_call(FINANCE_WHERE) if msg.get("force_finance") else auth_call
-            _verify_grant_binding(issuer_pk, grant, asked.as_dict(), DEMO_CONTEXT.as_dict())
+            try:
+                _verify_grant_binding(issuer_pk, grant, asked.as_dict(), DEMO_CONTEXT.as_dict())
+            except AuthorizationError as exc:
+                if msg.get("force_finance"):
+                    # R1.1: record the tampered ingress and PROVE no query ran.
+                    t = _truth(
+                        run_id, "data_service", False, None, None, None,
+                        "T2: DS received tampered Finance query; grant binds Sales; rejected before execution",
+                        executor_input=FINANCE_WHERE, tamper_stage=STAGE_T2,
+                    )
+                    truth_shared[run_id] = t
+                    return {"ok": False, "error": str(exc), "status": "REJECTED_PRE_QUERY",
+                            "truth": t}
+                raise
             if nonce != grant.payload["nonce"]:
                 raise AuthorizationError("nonce not bound to grant")
             exec_call = asked
@@ -529,6 +609,8 @@ def _ds_process(req_q: Any, resp_q: Any, issuer_pk: bytes, truth_shared: Any) ->
             p = sign_payload(digest_object(exec_call.args), claimed, request_id,
                              grant.grant_id, nonce)
             note = "DS executed bound query and signed canonical response"
+            exec_input = asked.args["where"]
+            stage = STAGE_NONE
             if attack == "T8":
                 # Malicious DS: runs authorized Sales, signs a FALSE Finance result.
                 # Valid signature; only the statement is false.
@@ -539,7 +621,7 @@ def _ds_process(req_q: Any, resp_q: Any, issuer_pk: bytes, truth_shared: Any) ->
 
         evidence = {"payload": p, "signature": ds_signer.sign_b64(p)}
         t = _truth(run_id, "data_service", True, probe["where"], probe["result"],
-                   claimed, note)
+                   claimed, note, executor_input=exec_input, tamper_stage=stage)
         truth_shared[run_id] = t
         return {"ok": True, "status": "EXECUTED", "output": claimed,
                 "evidence": evidence, "truth": t}
@@ -616,7 +698,10 @@ def _forward_proxy_process(
         if attack == "T4" and result.get("output"):
             result["output"] = copy.deepcopy(SUBSTITUTED_REAL_OUTPUT)
         # T10: DS returned FAILED with no evidence; proxy forges DS evidence
-        # with its own key -> Gateway rejects on ds signature/binding.
+        # with its OWN key -> Gateway rejects on DS public-key verification.
+        # R1.1 BUGFIX: sign the SAME `forged` payload that is submitted, so the
+        # rejection is attributable to key-source verification (not a stray
+        # signature over {"forged": True}).
         if attack == "T10" and result.get("status") == "FAILED":
             forged = {
                 "protocol_version": DS_EVIDENCE_VERSION, "source_id": SOURCE_ID,
@@ -629,7 +714,7 @@ def _forward_proxy_process(
             result["status"] = "EXECUTED"
             result["output"] = copy.deepcopy(SUBSTITUTED_REAL_OUTPUT)
             result["evidence"] = {"payload": forged,
-                                  "signature": proxy_signer.sign_b64({"forged": True})}
+                                  "signature": proxy_signer.sign_b64(forged)}
         return result
 
     make_service_loop(handler, proxy_signer.public_key_b64)(req_q, resp_q)
@@ -674,6 +759,7 @@ class ArchCSignedDataService:
 
     def _verify(self, evidence: dict[str, Any] | None, output: list,
                 expected: dict[str, Any]) -> Verdict:
+        # This function IS the Gateway DS-evidence verification flow.
         if evidence is None:
             return Verdict(False, "missing_ds_evidence", True)
         payload = evidence.get("payload", {})
@@ -709,8 +795,10 @@ class ArchCSignedDataService:
             "grant_id_hint": grant.grant_id, "query_digest_hint": query_digest,
         })
         if not resp.get("ok"):
-            return {"response": resp, "truth": None,
-                    "verdict": Verdict(False, resp.get("error", "denied"), True),
+            # DS/proxy denied BEFORE the Gateway evidence-verification flow.
+            return {"response": resp, "truth": resp.get("truth"),
+                    "verdict": Verdict(False, resp.get("error", "denied"), True,
+                                       gateway_verification_attempted=False),
                     "observation": None}
         v = self._verify(resp.get("evidence"), resp.get("output", []),
                          {"request_id": request_id, "grant_id": grant.grant_id,
@@ -788,7 +876,7 @@ class ArchDOracleAssistedObserver:
         result = self.c.execute(attack, run_id, grant, request_id, nonce)
         obs_resp = self.observer.call({"run_id": run_id, "request_id": request_id})
         result["observation"] = obs_resp
-        verdict = result["verdict"]
+        verdict: Verdict = result["verdict"]
         if verdict.accepted and obs_resp.get("ok"):
             obs = obs_resp["observation"]
             if verify_b64(self.observer_pk, obs["signature"], obs["payload"]):
@@ -802,9 +890,17 @@ class ArchDOracleAssistedObserver:
                     and p.get("observed_source_id") == cp.get("source_id")
                 )
                 if not consistent:
-                    result["verdict"] = Verdict(False, "observer_inconsistency", True)
+                    # Observer detection occurs AFTER the DS Gateway verification;
+                    # preserve gateway_verification_attempted from the C verdict.
+                    result["verdict"] = Verdict(
+                        False, "observer_inconsistency", True,
+                        gateway_verification_attempted=verdict.gateway_verification_attempted,
+                    )
                 else:
-                    result["verdict"] = Verdict(True, "accepted_with_observation", False)
+                    result["verdict"] = Verdict(
+                        True, "accepted_with_observation", False,
+                        gateway_verification_attempted=verdict.gateway_verification_attempted,
+                    )
         return result
 
     def close(self) -> None:

@@ -23,8 +23,9 @@ from src.model import (
     SEED_REQUEST_ID,
     issue_grant,
     make_call,
+    result_within_grant,
 )
-from src.primitives import Ed25519Signer, canonical_json, digest_object
+from src.primitives import Ed25519Signer, canonical_json, digest_object, verify_b64
 
 
 def _grant(issuer: Ed25519Signer, nonce: str, expired: bool = False):
@@ -242,6 +243,115 @@ class ArchitectureTests(unittest.TestCase):
         self.assertTrue(r["verdict"].accepted)
         self.assertEqual(r["verdict"].reason, "accepted_with_observation")
         d.close()
+
+
+class R11SemanticsTests(unittest.TestCase):
+    """R1.1 finite corrections: attack stages, T10 signature object, T5 replay, classes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.issuer = Ed25519Signer.generate()
+
+    def _fresh_shared(self):
+        self._mgr = mp.Manager()
+        self._shared = self._mgr.dict()
+        return self._shared
+
+    def _run(self, arch, attack, expired=False):
+        rid = f"r11-{arch.name}-{attack}"
+        nonce = f"n-{rid}"
+        g = _grant(self.issuer, nonce, expired=expired)
+        return arch.execute(attack, rid, g, rid + "-req", nonce)
+
+    # ---- Phase 1: T1 vs T2 real injection paths ----
+    def test_a_t1_t2_query_states_distinct(self):
+        a = ArchAAdapterReceipt(self.issuer)
+        t1, t2 = self._run(a, "T1")["truth"], self._run(a, "T2")["truth"]
+        self.assertEqual(t1["granted_query_where"]["department"], "Sales")
+        self.assertEqual(t1["executor_input_query_where"]["department"], "Sales")
+        self.assertEqual(t1["actual_query_where"]["department"], "Finance")
+        self.assertEqual(t1["tamper_stage"], "post_authorization_executor_override")
+        self.assertEqual(t2["granted_query_where"]["department"], "Sales")
+        self.assertEqual(t2["executor_input_query_where"]["department"], "Finance")
+        self.assertEqual(t2["actual_query_where"]["department"], "Finance")
+        self.assertEqual(t2["tamper_stage"], "pre_executor_ingress_tamper")
+        a.close()
+
+    def test_b_t1_t2_query_states_distinct(self):
+        b = ArchBIndependentProxy(self.issuer, self._fresh_shared()); b.make_seed()
+        t1, t2 = self._run(b, "T1")["truth"], self._run(b, "T2")["truth"]
+        self.assertEqual(t1["executor_input_query_where"]["department"], "Sales")
+        self.assertEqual(t2["executor_input_query_where"]["department"], "Finance")
+        self.assertNotEqual(t1["tamper_stage"], t2["tamper_stage"])
+        b.close()
+
+    # ---- Phase 2: T10 signs the real forged payload ----
+    def test_c_t10_signature_verifiable_under_proxy_key_not_ds_key(self):
+        c = ArchCSignedDataService(self.issuer, self._fresh_shared()); c.make_seed()
+        r = self._run(c, "T10")
+        ev = r["response"]["evidence"]
+        self.assertFalse(r["verdict"].accepted)
+        self.assertEqual(r["verdict"].reason, "ds_signature_invalid")
+        self.assertEqual(r["verdict"].gateway_verification_attempted, True)
+        self.assertFalse(r["truth"]["executed"])
+        # Proxy's own key DID sign the exact submitted payload; DS key did not.
+        self.assertTrue(verify_b64(c.proxy.public_key(), ev["signature"], ev["payload"]))
+        self.assertFalse(verify_b64(c.ds_pk, ev["signature"], ev["payload"]))
+        c.close()
+
+    # ---- Phase 3: classification uses gateway_verification_attempted ----
+    def test_classification_prevention_vs_detection(self):
+        from src.metrics import Attempt
+        def mk(gva, accepted, detected, executed=False):
+            return Attempt("A", "T5", "r", accepted, detected, "x", executed,
+                           False, False, gateway_verification_attempted=gva)
+        # Replay reached the verifier and was rejected -> B, never A.
+        self.assertEqual(mk(True, False, True).classify(), "B")
+        # DS pre-execution rejection never reached the verifier -> A.
+        self.assertEqual(mk(False, False, True).classify(), "A")
+        # Control -> CONTROL.
+        ctl = mk(False, True, False); ctl.is_control = True
+        self.assertEqual(ctl.classify(), "CONTROL")
+
+    # ---- Phase 5: T5 verbatim replay in ALL FOUR architectures ----
+    def _t5_digest_check(self, arch):
+        seed = arch.make_seed()
+        rid = f"r11-{arch.name}-T5"
+        nonce = f"n-{rid}"
+        g = _grant(self.issuer, nonce)
+        r = arch.execute("T5", rid, g, rid + "-req", nonce)
+        ev = r["response"]["evidence"]
+        self.assertEqual(seed["evidence_digest"], digest_object(ev))
+        p = ev["payload"]
+        self.assertEqual(p["nonce"], SEED_NONCE)   # replayed evidence carries old nonce
+        self.assertNotEqual(p["nonce"], nonce)     # historical nonce != CURRENT request nonce
+        self.assertNotEqual(p["request_id"], rid + "-req")
+        self.assertTrue(r["verdict"].gateway_verification_attempted)
+        self.assertFalse(r["verdict"].accepted)
+        self.assertTrue(r["verdict"].detected)
+        return r
+
+    def test_t5_digest_equal_all_architectures(self):
+        a = ArchAAdapterReceipt(self.issuer)
+        r = self._t5_digest_check(a)
+        self.assertIn("replay", r["verdict"].reason)
+        a.close()
+        b = ArchBIndependentProxy(self.issuer, self._fresh_shared())
+        self._t5_digest_check(b); b.close()
+        c = ArchCSignedDataService(self.issuer, self._fresh_shared())
+        self._t5_digest_check(c); c.close()
+        d = ArchDOracleAssistedObserver(self.issuer, self._fresh_shared())
+        # D replays the DS evidence verbatim; observer evidence is separate.
+        self._t5_digest_check(d); d.close()
+
+    # ---- Phase 4: presented vs accepted output metrics ----
+    def test_t4_output_presented_not_accepted_under_c(self):
+        c = ArchCSignedDataService(self.issuer, self._fresh_shared()); c.make_seed()
+        r = self._run(c, "T4")
+        self.assertFalse(r["verdict"].accepted)
+        final_output = r["response"]["output"]
+        self.assertFalse(result_within_grant(final_output))  # out-of-scope presented
+        c.close()
 
 
 if __name__ == "__main__":

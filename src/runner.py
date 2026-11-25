@@ -1,23 +1,21 @@
-"""Deterministic attack replay driver for D3-13-01-R1.
+"""Deterministic attack replay driver for D3-13-01-R1.1.
 
-R1 corrections:
-  * Explicit applicability matrix (38 arms: A7 / B9 / C11 / D11). N/A arms are
-    written to the JSON, never silently omitted or remapped.
-  * One historical seed request per architecture, minted and stored BEFORE the
-    attack arms; T5 replays it verbatim. Seed requests are logged in
-    meta.seed_requests and are NOT counted in any attack N.
-  * Ground truth per attempt records actual_query_where,
-    actual_query_result_digest, returned_output_digest, executed,
-    unauthorized_execution, unauthorized_result_disclosure, executor_role, note.
-  * Evidence bytes: C = DS evidence, D = DS evidence + Observer evidence.
-  * Only e2e wall-clock latency is reported (no fabricated gen/verify split,
-    no unverified process-startup timing claim).
-
-Totals at N=100: 34 attack arms x 100 = 3400 attack attempts;
-4 T12 control arms x 100 = 400 benign controls; 3800 formal trials.
+R1.1 corrections on top of R1:
+  * Each attempt records gateway_verification_attempted (from the REAL path via
+    Verdict), the three query states + tamper_stage, the replayed evidence digest,
+    and the evidence payload/signature + pinned public keys needed to re-verify
+    signatures offline. This is what makes the new B-vs-A classification and the
+    T5/T10 assertions auditable from raw_samples alone.
+  * Two independent output metrics: out_of_scope_output_presented (submitted to
+    the Gateway verifier) vs out_of_scope_output_accepted (final verifier,
+    including D's Observer step) -- acceptance by a human is NOT claimed.
+  * Same applicability matrix (38 arms: A7 / B9 / C11 / D11), same seed and
+    totals: 34 attack arms x 100 = 3400 attacks + 4 T12 x 100 = 400 controls
+    = 3800 formal trials; 4 seed requests are logged but excluded from N.
 """
 from __future__ import annotations
 
+import base64
 import json
 import multiprocessing as mp
 import os
@@ -53,8 +51,7 @@ REPEATS = int(os.environ.get("D3_13_REPEATS", "100"))
 ARCHITECTURES = ["A", "B", "C", "D"]
 ATTACKS = [f"T{i}" for i in range(1, 13)]
 
-# R1 Phase 1 fixed applicability matrix. N/A = the architecture has no such
-# role or evidence field; it is recorded in JSON, never remapped.
+# R1 applicability matrix (unchanged in R1.1). N/A recorded in JSON, never remapped.
 APPLICABLE: dict[str, set[str]] = {
     "A": {"T1", "T2", "T4", "T5", "T10", "T11", "T12"},
     "B": {"T1", "T2", "T3", "T4", "T5", "T6", "T10", "T11", "T12"},
@@ -62,7 +59,6 @@ APPLICABLE: dict[str, set[str]] = {
     "D": {"T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12"},
 }
 
-# Why an arm is N/A (never remapped to a different attack).
 NA_REASON: dict[str, dict[str, str]] = {
     "A": {
         "T3": "A has no independent Proxy signing identity; Adapter self-signs (covered by T1).",
@@ -81,6 +77,25 @@ NA_REASON: dict[str, dict[str, str]] = {
 }
 
 
+def _b64(raw: bytes) -> str:
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _public_keys(arch_key: str, arch: Any) -> dict[str, str]:
+    """Pinned / relevant verification keys, recorded for offline signature audits."""
+    if arch_key == "A":
+        return {"gateway_pinned": _b64(arch.pinned_pk), "adapter": _b64(arch.pinned_pk)}
+    if arch_key == "B":
+        return {"gateway_pinned": _b64(arch.pinned_pk), "proxy": _b64(arch.pinned_pk)}
+    if arch_key == "C":
+        return {"gateway_pinned_ds": _b64(arch.ds_pk), "ds": _b64(arch.ds_pk),
+                "proxy": _b64(arch.proxy.public_key())}
+    # D: reuse C's keys; plus the observer's own test-signing key.
+    return {"gateway_pinned_ds": _b64(arch.c.ds_pk), "ds": _b64(arch.c.ds_pk),
+            "proxy": _b64(arch.c.proxy.public_key()),
+            "observer": _b64(arch.observer_pk)}
+
+
 def _grant_for(issuer: Ed25519Signer, attack: str, nonce: str) -> SignedGrant:
     """Fresh grant per attempt. T11 = expired grant only (no snapshot-expiry test)."""
     now = int(time.time())
@@ -96,9 +111,7 @@ def _grant_for(issuer: Ed25519Signer, attack: str, nonce: str) -> SignedGrant:
 def _false_evidence_flag(evidence_payload: dict[str, Any] | None,
                          truth: dict[str, Any] | None,
                          accepted: bool) -> bool:
-    """Accepted-and-false decided by evidence-vs-ground-truth field compare,
-    never by attack name. T8/T9 (valid signature, false statement) are caught;
-    T12 (honest) is not."""
+    """Accepted-and-false decided by field compare, never by attack name."""
     if not accepted:
         return False
     return evidence_is_false(evidence_payload, truth)
@@ -146,7 +159,7 @@ def _synth_no_execution_truth(run_id: str, arch_key: str, note: str) -> dict[str
 def run_one_pass(repeats: int) -> dict[str, Any]:
     results: dict[str, Any] = {
         "meta": {
-            "stage": "D3-13-01-R1",
+            "stage": "D3-13-01-R1.1",
             "seed": SEED,
             "repeats_per_arm": repeats,
             "python": sys.version.split()[0],
@@ -154,13 +167,20 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
             "baseline_branch": "experiment/independent-execution-proxy",
             "baseline_head": "e327a9444ed8cea17baefbac01587b7fa77e8d39",
             "r0_commit": "22cc839eb41a15ff38580ac918361ccaf5a158e2",
+            "r1_commit": "01564c7fafb1606945f524176425c03ae3002e20",
             "observer_model": (
                 "D = Oracle-assisted Observer; truth_shared is a trusted TEST "
                 "ORACLE side channel (ideal-condition upper bound), NOT production "
                 "independent observation. H4 remains OPEN."
             ),
+            "classification_rule": (
+                "CONTROL=T12; A=no execution AND no Gateway verification AND rejected; "
+                "B=entered Gateway verification AND rejected AND detected; "
+                "C=accepted with real unauthorized exec or false evidence; else D."
+            ),
             "note": "single-host mock/process simulation; no production TEE; no Halo2",
             "seed_requests": [],
+            "public_keys": {},
             "applicability": {k: sorted(v) for k, v in APPLICABLE.items()},
             "na_reason": NA_REASON,
         },
@@ -175,11 +195,10 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
         truth_shared = mgr.dict()
         arch = _build_arch(arch_key, issuer, truth_shared)
         try:
-            # Seed request: mint and store ONE honest historical response.
-            # Not counted in any attack arm's N.
             seed_desc = arch.make_seed()
             seed_desc["arch"] = arch_key
             results["meta"]["seed_requests"].append(seed_desc)
+            results["meta"]["public_keys"][arch_key] = _public_keys(arch_key, arch)
 
             for attack in ATTACKS:
                 if attack not in APPLICABLE[arch_key]:
@@ -204,9 +223,6 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
                     e2e_ms = (time.perf_counter() - t0) * 1000.0
                     verdict: Verdict = result["verdict"]
 
-                    # Ground truth: prefer the executor's record; fall back to
-                    # truth_shared; synthesize 'no execution' when neither exists
-                    # (replay / pre-execution reject / proxy forgery).
                     truth = result.get("truth")
                     if truth is None and run_id in truth_shared:
                         truth = dict(truth_shared[run_id])
@@ -214,25 +230,25 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
                         truth = _synth_no_execution_truth(run_id, arch_key,
                                                           "no real execution (reject/replay/forge)")
 
-                    # R1: returned_output_digest & disclosure are derived from
-                    # what was actually handed to the Gateway, not from what the
-                    # executor thought it returned (this catches T4 substitution).
+                    # Output handed to the verifier, and whether it is out of scope.
                     resp = result.get("response", {})
                     final_output = resp.get("output") if isinstance(resp, dict) else None
                     returned_digest = (
                         digest_object(final_output) if final_output is not None else None
                     )
-                    disclosure = bool(final_output) and not result_within_grant(final_output)
+                    out_of_scope = bool(final_output) and not result_within_grant(final_output)
                     truth["returned_output_digest"] = returned_digest
-                    truth["unauthorized_result_disclosure"] = disclosure
+                    truth["unauthorized_result_disclosure"] = out_of_scope
 
                     ground_executed = bool(truth.get("executed"))
                     ground_unauth = bool(truth.get("unauthorized_execution"))
                     obs_payload = _observation_summary(result)
-                    ev_payload = (
-                        resp.get("evidence", {}).get("payload") if isinstance(resp, dict) else None
-                    )
+                    ev = resp.get("evidence") if isinstance(resp, dict) else None
+                    ev_payload = ev.get("payload") if isinstance(ev, dict) else None
+                    ev_digest = digest_object(ev) if isinstance(ev, dict) else None
                     false_acc = _false_evidence_flag(ev_payload, truth, verdict.accepted)
+                    presented = bool(out_of_scope and verdict.gateway_verification_attempted)
+                    accepted_out = bool(out_of_scope and verdict.accepted)
 
                     a = Attempt(
                         arch=arch_key, attack=attack, run_id=run_id,
@@ -241,7 +257,10 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
                         ground_executed=ground_executed,
                         ground_unauthorized=ground_unauth,
                         false_evidence_accepted=false_acc,
-                        unauthorized_result_disclosure=disclosure,
+                        gateway_verification_attempted=verdict.gateway_verification_attempted,
+                        out_of_scope_output_presented=presented,
+                        out_of_scope_output_accepted=accepted_out,
+                        unauthorized_result_disclosure=presented,
                         is_control=(attack == "T12"),
                     )
                     arm.add(a, evidence_bytes=_evidence_bytes(result, arch_key),
@@ -250,6 +269,16 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
                         "run_id": run_id, "arch": arch_key, "attack": attack,
                         "accepted": a.accepted, "detected": a.detected,
                         "reason": a.reason, "class": a.cls,
+                        "gateway_verification_attempted": a.gateway_verification_attempted,
+                        "nonce": nonce, "request_id": request_id,
+                        "replayed_evidence_digest": ev_digest,
+                        "evidence": ev,  # payload + signature, for offline re-verification
+                        "query_states": {
+                            "granted_query_where": truth.get("granted_query_where"),
+                            "executor_input_query_where": truth.get("executor_input_query_where"),
+                            "actual_query_where": truth.get("actual_query_where"),
+                            "tamper_stage": truth.get("tamper_stage"),
+                        },
                         "ground_truth": {
                             "executor_role": truth.get("executor_role"),
                             "executed": truth.get("executed"),
@@ -263,6 +292,8 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
                         "ground_executed": a.ground_executed,
                         "ground_unauthorized": a.ground_unauthorized,
                         "false_evidence_accepted": a.false_evidence_accepted,
+                        "out_of_scope_output_presented": a.out_of_scope_output_presented,
+                        "out_of_scope_output_accepted": a.out_of_scope_output_accepted,
                         "unauthorized_result_disclosure": a.unauthorized_result_disclosure,
                         "is_control": a.is_control,
                         "observation": obs_payload,
@@ -271,7 +302,6 @@ def run_one_pass(repeats: int) -> dict[str, Any]:
         finally:
             arch.close()
 
-    # Totals and counts.
     na_count = sum(1 for a in results["arms"] if a.get("status") == "NOT_APPLICABLE")
     applicable_arms = [a for a in results["arms"] if a.get("status") != "NOT_APPLICABLE"]
     attack_arms = [a for a in applicable_arms if a["attack"] != "T12"]
@@ -327,7 +357,8 @@ def main() -> None:
             f"A={arm['class_A_prevented']:>3} B={arm['class_B_detected']:>3} "
             f"C={arm['class_C_undetected']:>3} D={arm['class_D_indeterminate']:>3} "
             f"ASR={arm['ASR']} PR={arm['PR']} DR={arm['DR']} UER={arm['UER']} "
-            f"disc={arm['result_disclosure_rate']}"
+            f"presented={arm['out_of_scope_output_presented_rate']} "
+            f"accepted={arm['out_of_scope_output_accepted_rate']}"
         )
     print("FRR:", json.dumps(results["meta"]["frr_legit_T12"], ensure_ascii=False))
 

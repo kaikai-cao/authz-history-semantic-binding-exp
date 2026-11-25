@@ -1,24 +1,38 @@
-"""Metric definitions and aggregation for D3-13-01-R1.
+"""Metric definitions and aggregation for D3-13-01-R1.1.
 
 Denominators (quote verbatim in ATTACK-RESULTS.md):
   ASR = real unauthorized query executions / attack attempts
-  PR  = prevented before query execution (class A) / attack attempts
+  PR  = class A (pre-execution prevention) / attack attempts
   DR  = detected AFTER a real unauthorized execution / real unauthorized executions
         (N/A when the denominator is 0 -- never 0, never 1)
   UER = accepted false/illegal evidence without detection (class C) / attack attempts
   FRR = legit T12 runs wrongly rejected / legit T12 runs
 
-R1 additions:
-  - unauthorized_result_disclosure is counted SEPARATELY from ASR. T4 executes
-    an authorized query but returns a different real result: ASR=0, disclosure=1.
-  - "no real execution but accepted a forged success status" (T3/T10) is class C
-    via false_evidence_accepted; it is never folded into the normal path.
+R1.1 classification change (the core correction of this round):
+  "No query executed" does NOT automatically mean "prevention". A forged/replayed
+  response that REACHES the Gateway verifier and is rejected is class B
+  (post-submission detection), not class A. The discriminator is the explicit
+  field `gateway_verification_attempted`, set by the REAL execution path and
+  NEVER inferred from `accepted`/`executed`.
 
-Per-attempt mutually exclusive classification:
-  A prevented    : no ground-truth execution AND Gateway rejected.
-  C undetected   : Gateway accepted and (unauthorized execution OR false evidence).
-  B detected     : Gateway/observer rejected a violation that reached submission.
-  D indeterminate: anything else (kept, explained; never relabelled to look tidy).
+Per-attempt mutually exclusive classification (strict order):
+  0. T12 -> CONTROL.
+  1. no execution AND response did NOT enter Gateway verification AND rejected
+     -> A (pre-execution prevention).
+  2. response DID enter Gateway verification AND rejected AND detected -> B
+     (post-submission detection).
+  3. accepted AND (real unauthorized exec OR false/illegal evidence) -> C
+     (undetected acceptance).
+  4. anything else -> D (indeterminate; kept and explained, never relabelled).
+
+Output metrics (R1.1, two INDEPENDENT quantities):
+  out_of_scope_output_presented : out-of-scope output submitted to the Gateway
+                                  verifier (acceptance NOT required).
+  out_of_scope_output_accepted  : out-of-scope output accepted by the FINAL
+                                  verifier (under D: after the Observer; not the
+                                  intermediate DS Gateway verdict).
+  Neither proves a human end user actually read/consumed the data.
+  `result_disclosure_rate` is a deprecated alias of the presented rate.
 """
 from __future__ import annotations
 
@@ -37,7 +51,10 @@ class Attempt:
     ground_executed: bool
     ground_unauthorized: bool
     false_evidence_accepted: bool
-    unauthorized_result_disclosure: bool = False
+    gateway_verification_attempted: bool = True  # set by the real execution path
+    out_of_scope_output_presented: bool = False
+    out_of_scope_output_accepted: bool = False
+    unauthorized_result_disclosure: bool = False  # legacy == presented
     is_control: bool = False   # T12 honest path: excluded from all attack metrics
     cls: str = "D"
 
@@ -45,15 +62,18 @@ class Attempt:
         if self.is_control:
             self.cls = "CONTROL"
             return self.cls
-        # Pre-execution denial: no ground-truth execution and rejected.
-        if (not self.ground_executed) and (not self.accepted):
+        # 1. Pre-execution prevention: no query ran AND the attack never reached
+        #    the Gateway evidence-verification flow AND it was rejected.
+        if (not self.ground_executed) and (not self.gateway_verification_attempted) \
+                and (not self.accepted):
             self.cls = "A"
-        # Accepted something false/illegal and not flagged -> undetected.
+        # 2. Post-submission detection: response DID enter the Gateway verifier,
+        #    was rejected, and the anomaly was flagged.
+        elif self.gateway_verification_attempted and (not self.accepted) and self.detected:
+            self.cls = "B"
+        # 3. Undetected acceptance of a real violation.
         elif self.accepted and (self.ground_unauthorized or self.false_evidence_accepted):
             self.cls = "C"
-        # Rejected but correctly flagged a violation that reached submission.
-        elif (not self.accepted) and self.detected:
-            self.cls = "B"
         else:
             self.cls = "D"
         return self.cls
@@ -70,7 +90,9 @@ class ArmMetrics:
     d_indeterminate: int = 0
     ground_unauthorized: int = 0
     false_evidence_accepted: int = 0
-    result_disclosures: int = 0
+    output_presented: int = 0
+    output_accepted: int = 0
+    result_disclosures: int = 0  # legacy == output_presented
     e2e_latency_ms_total: float = 0.0
     evidence_bytes_total: int = 0
     extra_processes: int = 0
@@ -82,9 +104,8 @@ class ArmMetrics:
         self.n += 1
         a.classify()
         self.attempts.append(a)
-        # Latency and evidence size are observations orthogonal to the attack
-        # classification; accumulate them for control arms too, so T12 reflects
-        # the true per-request cost (incl. Observer evidence under D).
+        # Latency and evidence size are observations orthogonal to attack class;
+        # accumulate them for control arms too (incl. Observer evidence under D).
         self.evidence_bytes_total += evidence_bytes
         self.e2e_latency_ms_total += e2e_ms
         if a.is_control:
@@ -101,6 +122,10 @@ class ArmMetrics:
             self.ground_unauthorized += 1
         if a.false_evidence_accepted:
             self.false_evidence_accepted += 1
+        if a.out_of_scope_output_presented:
+            self.output_presented += 1
+        if a.out_of_scope_output_accepted:
+            self.output_accepted += 1
         if a.unauthorized_result_disclosure:
             self.result_disclosures += 1
 
@@ -130,8 +155,17 @@ class ArmMetrics:
         return self.c_undetected / self.n if self.n else 0.0
 
     @property
+    def presented_rate(self) -> float:
+        return self.output_presented / self.n if self.n else 0.0
+
+    @property
+    def accepted_rate(self) -> float:
+        return self.output_accepted / self.n if self.n else 0.0
+
+    @property
     def disclosure_rate(self) -> float:
-        return self.result_disclosures / self.n if self.n else 0.0
+        # Deprecated alias: kept identical to the presented rate.
+        return self.presented_rate
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -144,12 +178,19 @@ class ArmMetrics:
             "class_D_indeterminate": self.d_indeterminate,
             "ground_unauthorized_executions": self.ground_unauthorized,
             "false_evidence_accepted": self.false_evidence_accepted,
+            "gateway_verification_attempted_count": sum(
+                1 for a in self.attempts if a.gateway_verification_attempted
+            ),
+            "out_of_scope_output_presented": self.output_presented,
+            "out_of_scope_output_accepted": self.output_accepted,
+            "out_of_scope_output_presented_rate": self.presented_rate,
+            "out_of_scope_output_accepted_rate": self.accepted_rate,
+            "result_disclosure_rate": self.disclosure_rate,  # deprecated alias
             "unauthorized_result_disclosures": self.result_disclosures,
             "ASR": self.asr,
             "PR": self.pr,
             "DR": self.dr,
             "UER": self.uer,
-            "result_disclosure_rate": self.disclosure_rate,
             "e2e_latency_ms_mean": round(self.e2e_latency_ms_total / self.n, 4) if self.n else None,
             "evidence_gen_ms_mean": None,     # not separately instrumented; see ATTACK-RESULTS.md §2
             "gateway_verify_ms_mean": None,   # not separately instrumented; see ATTACK-RESULTS.md §2

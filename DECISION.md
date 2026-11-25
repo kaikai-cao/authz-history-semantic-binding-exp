@@ -1,9 +1,9 @@
-# D3-13-01-R1 — 阶段裁决
+# D3-13-01-R1.1 — 阶段裁决
 
 **状态**：`CONDITIONAL_HOLD`（信任边界有实质改进；H4 保持 OPEN；不进入 ZKP 原型）｜日期：2026-11-25
-**性质**：实验裁决（R1 语义与口径修订），不是论文立项，不是新证明系统声明
+**性质**：实验裁决（R1.1 攻击注入、签名对象与检测指标修订），不是论文立项，不是新证明系统声明
 
-> **R1 边界**：从 R0 commit `22cc839` 新建独立分支，仅做攻击语义修正、历史重放、执行前失败、Oracle 信任边界与指标口径修正。**不改变 D3-13 整体裁决**。D 已重新定性为 **Oracle-assisted Observer（可信实验 Oracle 辅助的观测上界）**，不再宣称"已解决 H4"。
+> **R1.1 边界**：从 R1 commit `01564c7` 新建独立分支，仅做三处有限修正——T10 签名对象 Bug、T1/T2 注入路径区分、"未执行查询≠执行前预防"的分类口径（T5/T3/T7/T10 从 A 改 B、PR 从 1 改 0），并把越权输出呈现/接受拆为两个指标。**不改变 D3-13 整体裁决**。D 仍为 **Oracle-assisted Observer**，H4 保持 OPEN。
 
 ---
 
@@ -13,9 +13,9 @@
 |---|---|---|---|
 | 1 | 执行者自签证据能否阻断自洽虚假回执？ | **不能**（A/B 全败） | A 的 T1/T2/T4/T10、B 的 T1/T2/T3/T4/T10 均 UER=1.0；B≈A |
 | 2 | 进程隔离本身是否等于信任隔离？ | **不等于** | B（独立进程）与 A 攻击结果一致 |
-| 3 | 证据产生权转移到独立 DS + 密钥隔离 + 字段绑定是否有实质改进？ | **有** | C 挡住全部 Proxy 作恶：T2/T3/T5/T7/T10 PR=1.0，T4/T6 检测；T10 执行前失败伪造 PR=1.0 |
-| 4 | Gateway 能否确认响应由指定 DS 签署（H1）？ | **能** | C 的 T3/T7 → ds_signature_invalid，PR=1.0 |
-| 5 | Gateway 能否确认响应绑定当前授权/nonce（H2）？ | **能** | C 的 T2 执行前拒绝、T5 历史重放拒绝，PR=1.0 |
+| 3 | 证据产生权转移到独立 DS + 密钥隔离 + 字段绑定是否有实质改进？ | **有** | C 挡住全部 Proxy 单方面作恶：T2/T11 执行前预防（A 类 PR=1）；T3/T4/T5/T6/T7/T10 提交后检出（B 类，PR=0 但 UER=0） |
+| 4 | Gateway 能否确认响应由指定 DS 签署（H1）？ | **能** | C 的 T3/T7/T10 → ds_signature_invalid，B 类 100/100、UER=0（**提交后检测，非预防**） |
+| 5 | Gateway 能否确认响应绑定当前授权/nonce（H2）？ | **能** | C 的 T2 执行前拒绝（A 类 PR=1）；T5 重放、T4 结果替换经绑定检出（B 类） |
 | 6 | 可信 Oracle 前提下，观测能否检测 DS 声明不一致（H5）？ | **能（仅理想条件下界）** | D 的 T8/T9 → observer_inconsistency，B 类 100/100、UER=0；T9 DR=1.0，T8 DR=N/A（无越权执行分母，虚假声明检出 100/100）。**依赖可信 Oracle 假设，非生产结论** |
 
 ---
@@ -24,8 +24,8 @@
 
 | 判定 | 回答 | 成立条件 / 不成立原因 |
 |---|---|---|
-| **H1** 响应由指定 DS 签署？ | **成立（C/D）** | Gateway 直接固定 DS 公钥；Proxy 自签被拒（T3/T7 PR=1.0）。前提：DS 公钥可信分发 |
-| **H2** 绑定当前授权请求与 nonce？ | **成立（C/D）** | 10 字段签名 + G 侧逐字段绑定 + 当前请求绑定；T2 执行前拒绝、T5 历史重放拒绝、T11 过期 Grant 拒绝 |
+| **H1** 响应由指定 DS 签署？ | **成立（C/D）** | Gateway 直接固定 DS 公钥；Proxy 自签被拒（T3/T7/T10 → ds_signature_invalid，B 类 100/100、UER=0；**非 PR 预防**）。前提：DS 公钥可信分发 |
+| **H2** 绑定当前授权请求与 nonce？ | **成立（C/D）** | 10 字段签名 + G 侧逐字段绑定 + 当前请求绑定；T2 执行前拒绝（A 类 PR=1）、T5 重放/T4 结果替换经绑定检出（B 类）、T11 过期 Grant 拒绝（A 类） |
 | **H3** 响应来自 DS 执行边界？ | **部分成立** | C 有 DS 进程 ground-truth 记录（truth_shared），可事后定位；Gateway 验签时看到的是 DS 声明，非直接观测执行 |
 | **H4** DS 本身没撒谎？ | **C 不成立；D 仅在可信 Oracle 下检出；正式状态 OPEN** | C 的 T8 UER=1.0（签名有效但假声明，ASR=0）、T9 UER=1.0 DR=0；D 靠 Oracle-assisted Observer 使 T8/T9 均 B 类 100/100、UER=0（T9 DR=1.0；T8 无越权执行分母，DR=N/A，虚假声明检出 100/100）。检出依赖"Oracle 通道如实记录 DS 执行"这一未解决假设——**H4 保持 OPEN** |
 | **H5** Oracle 提供真实记录前提下能否检出不一致？ | **能（理想上界，非生产条件）** | D 的 T8/T9 observer_inconsistency，B 类 100/100；前提是 `truth_shared` 未被 DS/Proxy 合谋控制 |
@@ -71,9 +71,9 @@
 
 ## 5. 与冻结成果的关系
 
-- **未修改**任何冻结仓库：`agent-exec-binding-mvp`、`D3-06-C`、`D3-07-A/B`、`D3-08`～`D3-12`，以及 R0 分支 `exp-d3-13-independent-execution-evidence`（仍指向 `22cc839`）。
+- **未修改**任何冻结仓库：`agent-exec-binding-mvp`、`D3-06-C`、`D3-07-A/B`、`D3-08`～`D3-12`，以及 R0 分支 `exp-d3-13-independent-execution-evidence`（仍指向 `22cc839`）与 R1 分支 `exp-d3-13-independent-execution-evidence-r1`（仍指向 `01564c7`）。
 - 基线只读：MVP HEAD `e327a9444ed8cea17baefbac01587b7fa77e8d39`，分支 `experiment/independent-execution-proxy`，工作区 clean。
-- R1 为独立实验分支（orphan 单根），从 R0 固定 commit 继续，不改任何既有分支。
+- R1 为独立实验分支（orphan 单根），从 R0 固定 commit 继续，不改任何既有分支；**R1.1 从 R1 固定 commit `01564c7` 继续，分支 `exp-d3-13-independent-execution-evidence-r1-1`**，R0/R1 两分支均保持不变。
 
 ---
 
@@ -106,7 +106,8 @@
 
 - 仓库：`D:\Research\d3-13-independent-execution-evidence`
 - R0 固定 SHA：`22cc839eb41a15ff38580ac918361ccaf5a158e2`（分支 `exp-d3-13-independent-execution-evidence`）
-- R1 分支：`exp-d3-13-independent-execution-evidence-r1`
-- 命令：`python -m unittest discover -s tests -v`（19 项）；`python -m src.runner`（3800 次）
-- 输出：`results/attack_results.json`（3800 raw + 4 seed + 38 臂 + 10 N/A）、`results/run_log.txt`
+- R1 固定 SHA：`01564c7fafb1606945f524176425c03ae3002e20`（分支 `exp-d3-13-independent-execution-evidence-r1`）
+- R1.1 分支：`exp-d3-13-independent-execution-evidence-r1-1`
+- 命令：`python -m unittest discover -s tests -v`（25 项）；`python -m src.runner`（3800 次）；`python -m tests.verify_results`（16 组断言）
+- 输出：`results/attack_results.json`（3800 raw + 4 seed + 38 臂 + 10 N/A + 验签公钥）、`results/run_log.txt`
 - 提交/推送 SHA：见汇报（本文件落盘后执行）

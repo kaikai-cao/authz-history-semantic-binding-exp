@@ -1,6 +1,6 @@
-# D3-13-01-R1 — 威胁模型
+# D3-13-01-R1.1 — 威胁模型
 
-**状态**：受控实验威胁模型｜日期：2026-11-25｜证据等级：R0 定义 + R1 语义修订 + R1 实测
+**状态**：受控实验威胁模型｜日期：2026-11-25｜证据等级：R0 定义 + R1 语义修订 + R1.1 攻击注入/检测指标修订 + R1.1 实测
 **配套**：`README.md`、`ATTACK-RESULTS.md`、`ARCHITECTURE-COMPARISON.md`
 
 ---
@@ -22,6 +22,8 @@
 4. **D（Oracle-assisted Observer）**：C + Observer 旁路取证，但观测记录来自 `truth_shared`——**受控模拟中的可信测试 Oracle**。
 
 > **硬边界**：进程隔离 ≠ 信任隔离（B 与 A 攻击结果相同，R1 实测证实）；可信 Oracle 下的检出 ≠ 生产级独立观测 ≠ 解决 H4。
+>
+> **R1.1 分类纪律**：查询未执行 ≠ 执行前预防。攻击者伪造的证据**提交到 Gateway 后被拒**是**提交后检测（B 类）**，只有**未进入验证流程即被拒**才算 A 类预防。T5/T3/T7/T10 因此从 A 重分类为 B、PR 由 1.0 改为 0.0。判定依据是真实路径设置的 `gateway_verification_attempted` 字段，不从 `executed`/`accepted` 推断。
 
 ---
 
@@ -43,8 +45,8 @@
 
 | 目标 | 操作化判定 | R1 判定 |
 |---|---|---|
-| H1 执行来源认证 | evidence 上 Ed25519 签名用 Gateway 固定的 DS 公钥验过 | C/D 可（PR=1 挡住 T3/T7） |
-| H2 执行语义绑定 | canonical_query_digest / nonce / grant_id / request_id 绑定当前授权 | C/D 可（PR=1 挡住 T2/T5） |
+| H1 执行来源认证 | evidence 上 Ed25519 签名用 Gateway 固定的 DS 公钥验过 | C/D 可：T3/T7/T10 伪造签名被拒（B 类提交后检测，UER=0；**非 PR 预防**） |
+| H2 执行语义绑定 | canonical_query_digest / nonce / grant_id / request_id 绑定当前授权 | C/D 可：T2 执行前拒（A 类预防，PR=1）；T5 重放经验签/绑定检查后拒（B 类，PR=0） |
 | H3 来自 DS 执行边界 | 有 DS 进程内实际执行的 ground-truth 记录 | C/D 可取证（`truth_shared`）；A/B 无独立边界 |
 | H4 DS 没撒谎 | 签名声明与真实执行一致 | **C 不可**（T8 UER=1、T9 UER=1 DR=0）；**D 仅在可信 Oracle 下检出**（T8/T9 observer_inconsistency，B 类 100/100、UER=0；T9 DR=1，T8 DR=N/A）。**H4 正式状态仍为 OPEN** |
 | H5 Oracle 前提下的不一致检测 | 在可信 Oracle 提供真实执行记录的前提下，观测机制能否检测 DS 声明与执行记录的不一致 | D 可（理想条件下界）；**不代表生产条件下成立** |
@@ -59,16 +61,16 @@
 
 | ID | 名称 | 真实注入行为（R1） | 适用性 | 预期（安全目标角度） |
 |---|---|---|---|---|
-| T1 | 自洽虚假 Receipt | 执行者真实执行 Finance，签 request_hash=Sales 回执 | A/B；C/D N/A | A/B 接受（E2.2 反例） |
-| T2 | 查询参数篡改 | 参数从 Sales 改成 Finance 后执行 | 全架构 | A/B 接受；C/D 的 DS 对照 Grant request_hash **执行前拒绝**（ASR=0、PR=1） |
+| T1 | 自洽虚假 Receipt | **入口 Sales** → Grant 绑定通过 → 执行者内部覆盖为 **Finance**（`tamper_stage=post_authorization_executor_override`）→ 签 request_hash=Sales 回执 | A/B；C/D N/A | A/B 接受（E2.2 反例） |
+| T2 | 查询参数篡改 | **入口已是 Finance**（`pre_executor_ingress_tamper`）→ A/B 执行者不重绑定直接执行；C/D 的 Proxy 转给 DS，DS 对照 Grant **执行前拒绝**（`actual_query_where=null`、ASR=0、A 类 PR=1） | 全架构 | A/B 接受；C/D 预防 |
 | T3 | Proxy 自签虚假 Evidence | Proxy 用**自己**私钥伪造 evidence（信任来源问题，区别于 T1 的执行/声明不一致） | B/C/D；A N/A | B TOFU 接受；C/D 固定 DS 公钥验签拒绝 |
 | T4 | 结果替换 | **执行授权 Sales**，但返回另一条**真实存在**的 Finance 结果（不重跑 Finance）；truth 分记执行结果摘要与返回输出摘要 | 全架构 | A/B 接受（UER=1，ASR=0，披露=1）；C/D 因 result_digest 不匹配检出（B 类） |
-| T5 | 历史响应重放 | seed request 生成合法历史响应并原样保存；T5 在**新 request_id/Grant/nonce** 下原样重放旧 evidence（不改 nonce、不重签） | 全架构 | 全部因当前请求绑定/nonce 不匹配拒绝（PR=1）；seed 不计入 N |
+| T5 | 历史响应重放 | seed request 生成合法历史响应并原样保存；T5 在**新 request_id/Grant/nonce** 下原样重放旧 evidence（不改 nonce、不重签）；四架构 `replayed_evidence_digest == seed.evidence_digest` | 全架构 | 全部进入 Gateway 后因当前请求绑定/nonce 不匹配拒绝 → **B 类、PR=0**（R1 误归 A）；seed 不计入 N |
 | T6 | 证据字段篡改 | B：Proxy 改自己签的 source/snapshot 后用自己的密钥重签（B Gateway 不绑定该字段→接受，但 truth 判为虚假）；C/D：DS 签后 Proxy 改 source_id/snapshot_id | B/C/D；A N/A | B 接受（暴露绑定缺口）；C/D 因 DS 签名无效拒绝 |
 | T7 | 伪造 DS 身份/签名 | Proxy 用自己密钥签声称来自指定 DS 的 evidence | C/D；A/B N/A | C/D 因 DS 公钥验签拒绝；与 T3 同类密钥来源边界 |
 | T8 | 恶意 DS 合法密钥签假结果 | DS **执行授权 Sales**，但用真实私钥签 Finance 假结果 | C/D；A/B N/A | **签名必然有效**；C 接受（UER=1、ASR=0、披露=1）；D 在 Oracle 下检出 |
 | T9 | DS + Proxy 合谋 | DS 真实执行 Finance，签伪装成授权查询的 digest | C/D；A/B N/A | C 接受（ASR=1、UER=1、DR=0）；D 在 Oracle 下检出（DR=1） |
-| T10 | 执行失败后伪造成功 | 工具在**查询执行前失败**（`executed=false`），随后伪造 `status=EXECUTED` | 全架构 | A/B 接受（虚假成功证据，UER=1）；C/D Proxy 无 DS 私钥，伪造证据被拒（PR=1） |
+| T10 | 执行失败后伪造成功 | 工具在**查询执行前失败**（`executed=false`），随后伪造 `status=EXECUTED`；R1.1 修正 Proxy 对**真实 forged payload** 签名（Proxy 公钥可验、DS 公钥不可验） | 全架构 | A/B 接受（虚假成功证据，UER=1）；C/D Proxy 无 DS 私钥，伪造证据进入 Gateway 后 `ds_signature_invalid` 拒绝（**B 类、PR=0**） |
 | T11 | 过期 Grant | 签名有效的 Grant，`expires_at` 已过期，执行前拒绝 | 全架构 | 全部拒绝（PR=1）。**仅验证过期 Grant，不代表验证过期 snapshot** |
 | T12 | 正常路径 | 全角色诚实，合法 Sales 查询成功返回 | 全架构 | 接受（FRR 控制组，不入攻击分母） |
 
@@ -78,8 +80,8 @@
 
 ---
 
-## 5. 每次尝试的必记字段（R1 Phase 2）
+## 5. 每次尝试的必记字段（R1.1 Phase 1/2/4）
 
-`run_id`、`arch`、`attack`、`accepted`、`detected`、`reason`、`class`、`executor_role`、`executed`、`actual_query_where`、`actual_query_result_digest`、`returned_output_digest`、`unauthorized_execution`、`unauthorized_result_disclosure`、`false_evidence_accepted`、`observation`、`is_control`。
+`run_id`、`arch`、`attack`、`accepted`、`detected`、`reason`、`class`、`gateway_verification_attempted`、`nonce`、`request_id`、`replayed_evidence_digest`、`evidence`（payload+signature）、`query_states`（`granted_query_where`/`executor_input_query_where`/`actual_query_where`/`tamper_stage`）、`executor_role`、`executed`、`actual_query_result_digest`、`returned_output_digest`、`unauthorized_execution`、`out_of_scope_output_presented`、`out_of_scope_output_accepted`、`false_evidence_accepted`、`observation`、`is_control`。
 
-`false_evidence_accepted` 由 **Evidence 与 ground truth 的字段比对**计算（`src/consistency.py`），不按攻击编号赋值。3800 条逐次记录见 `results/attack_results.json::raw_samples`；4 条 seed request 见 `meta.seed_requests`（不计入 N）。所有 ASR/PR/DR/UER/FRR/披露率均可由 raw_samples 重算（R1 已逐臂校验零偏差）。
+`false_evidence_accepted` 由 **Evidence 与 ground truth 的字段比对**计算（`src/consistency.py`），不按攻击编号赋值；分类由真实路径的 `gateway_verification_attempted` 决定，不从结果反推。3800 条逐次记录见 `results/attack_results.json::raw_samples`；4 条 seed request 见 `meta.seed_requests`（不计入 N）；验签公钥见 `meta.public_keys`（支持 T10 离线复核）。所有 ASR/PR/DR/UER/FRR 与两个输出指标均可由 raw_samples 重算（`python -m tests.verify_results` 16 组断言零偏差）。

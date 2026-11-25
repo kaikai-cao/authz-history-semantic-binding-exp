@@ -337,8 +337,25 @@ def build_truth(
     actual_result: list[dict[str, Any]] | None,
     returned_output: list[dict[str, Any]] | None,
     note: str = "",
+    *,
+    granted_query_where: dict[str, Any] | None = None,
+    executor_input_query_where: dict[str, Any] | None = None,
+    tamper_stage: str = "none",
 ) -> dict[str, Any]:
-    """R1 ground truth: separate real execution from returned output.
+    """R1.1 ground truth: separate real execution from returned output, AND
+    distinguish the three query states so T1 and T2 are different real attacks.
+
+      granted_query_where         : what the grant authorized (Sales/2026).
+      executor_input_query_where  : what the executor actually received.
+      actual_query_where          : what the DS truly ran (None if not executed).
+      tamper_stage                : where the parameter diverged from the grant.
+        - none                              : no divergence (honest / result-only)
+        - post_authorization_executor_override (T1): executor got Sales, grant
+          check passed, executor then overrode to Finance before running it.
+        - pre_executor_ingress_tamper (T2)  : request already Finance when it
+          reached the executor; executor did NOT re-bind the actual input.
+        - collusion_ds_finance              (T9): colluding DS ran Finance.
+        - historical_replay / pre_execution_failure : no new query.
 
     Written by the role that actually controls the query path, and reported to
     the driver over the experiment side channel. For architecture D this side
@@ -360,6 +377,15 @@ def build_truth(
         "actual_source_id": SOURCE_ID if executed else None,
         "unauthorized_execution": unauthorized_exec,
         "unauthorized_result_disclosure": unauthorized_disclosure,
+        # R1.1 query-state provenance
+        "granted_query_where": copy.deepcopy(
+            granted_query_where if granted_query_where is not None else AUTHORIZED_WHERE
+        ),
+        "executor_input_query_where": (
+            copy.deepcopy(executor_input_query_where)
+            if executor_input_query_where is not None else None
+        ),
+        "tamper_stage": tamper_stage,
         # legacy aliases kept so older tooling keeps working
         "result_digest": actual_res_digest,
         "actual_where": copy.deepcopy(actual_where) if actual_where is not None else None,

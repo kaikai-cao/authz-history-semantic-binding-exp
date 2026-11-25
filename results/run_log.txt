@@ -1,41 +1,41 @@
 SEED=20261125 REPEATS=100 -> D:\Research\d3-13-independent-execution-evidence\results\attack_results.json
 counts={"applicable_arms": 38, "na_arms": 10, "attack_arms": 34, "control_arms": 4, "attack_attempts": 3400, "benign_controls": 400, "formal_trials_total": 3800, "raw_samples": 3800, "seed_requests_excluded": 4}
-A  T1 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 disc=1.0
-A  T2 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 disc=1.0
-A  T4 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 disc=1.0
-A  T5 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-A T10 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 disc=1.0
-A T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-A T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=0.0
-B  T1 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 disc=1.0
-B  T2 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 disc=1.0
-B  T3 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 disc=1.0
-B  T4 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 disc=1.0
-B  T5 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-B  T6 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 disc=0.0
-B T10 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 disc=1.0
-B T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-B T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=0.0
-C  T2 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-C  T3 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=1.0
-C  T4 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=1.0
-C  T5 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-C  T6 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=0.0
-C  T7 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=1.0
-C  T8 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 disc=1.0
-C  T9 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 disc=1.0
-C T10 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=1.0
-C T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-C T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=0.0
-D  T2 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-D  T3 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=1.0
-D  T4 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=1.0
-D  T5 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-D  T6 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=0.0
-D  T7 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=1.0
-D  T8 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=1.0
-D  T9 N=100 A=  0 B=100 C=  0 D=  0 ASR=1.0 PR=0.0 DR=1.0 UER=0.0 disc=1.0
-D T10 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=1.0
-D T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 disc=0.0
-D T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 disc=0.0
+A  T1 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 presented=1.0 accepted=1.0
+A  T2 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 presented=1.0 accepted=1.0
+A  T4 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 presented=1.0 accepted=1.0
+A  T5 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+A T10 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 presented=1.0 accepted=1.0
+A T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+A T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+B  T1 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 presented=1.0 accepted=1.0
+B  T2 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 presented=1.0 accepted=1.0
+B  T3 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 presented=1.0 accepted=1.0
+B  T4 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 presented=1.0 accepted=1.0
+B  T5 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+B  T6 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 presented=0.0 accepted=0.0
+B T10 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 presented=1.0 accepted=1.0
+B T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+B T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+C  T2 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+C  T3 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+C  T4 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+C  T5 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+C  T6 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+C  T7 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+C  T8 N=100 A=  0 B=  0 C=100 D=  0 ASR=0.0 PR=0.0 DR=None UER=1.0 presented=1.0 accepted=1.0
+C  T9 N=100 A=  0 B=  0 C=100 D=  0 ASR=1.0 PR=0.0 DR=0.0 UER=1.0 presented=1.0 accepted=1.0
+C T10 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+C T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+C T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+D  T2 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+D  T3 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+D  T4 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+D  T5 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+D  T6 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+D  T7 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+D  T8 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+D  T9 N=100 A=  0 B=100 C=  0 D=  0 ASR=1.0 PR=0.0 DR=1.0 UER=0.0 presented=1.0 accepted=0.0
+D T10 N=100 A=  0 B=100 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=1.0 accepted=0.0
+D T11 N=100 A=100 B=  0 C=  0 D=  0 ASR=0.0 PR=1.0 DR=None UER=0.0 presented=0.0 accepted=0.0
+D T12 N=100 A=  0 B=  0 C=  0 D=  0 ASR=0.0 PR=0.0 DR=None UER=0.0 presented=0.0 accepted=0.0
 FRR: {"A": {"legit_runs": 100, "legit_rejected": 0, "FRR": 0.0, "normal_accept_rate": 1.0}, "B": {"legit_runs": 100, "legit_rejected": 0, "FRR": 0.0, "normal_accept_rate": 1.0}, "C": {"legit_runs": 100, "legit_rejected": 0, "FRR": 0.0, "normal_accept_rate": 1.0}, "D": {"legit_runs": 100, "legit_rejected": 0, "FRR": 0.0, "normal_accept_rate": 1.0}}
