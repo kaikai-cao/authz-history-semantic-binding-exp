@@ -301,3 +301,67 @@ def execute_query(
         "comparison_events": sum(1 for row in data for _ in where.items()),
     }
     return output, probe
+
+
+# --- R1: fixed seed-request constants and the enriched ground-truth record ---
+# A historical response is produced ONCE per architecture from an independent
+# seed request, stored, then replayed verbatim by T5. The seed request is NOT
+# counted in any attack arm's N; it is logged in meta.seed_requests.
+SEED_RUN_ID = "d3-13-historical-seed"
+SEED_REQUEST_ID = "20261125-seed-req"
+SEED_NONCE = "20261125-seed-nonce"
+
+
+def result_within_grant(output: list[dict[str, Any]] | None) -> bool:
+    """True iff every returned row is inside the granted Sales filter scope.
+
+    In this fixture the only out-of-scope data is Finance rows, so "returned a
+    row whose department/year does not match AUTHORIZED_WHERE" is the concrete
+    instantiation of unauthorized_result_disclosure. An empty result discloses
+    nothing.
+    """
+    if not output:
+        return True
+    return all(
+        isinstance(row, dict)
+        and all(row.get(key) == value for key, value in AUTHORIZED_WHERE.items())
+        for row in output
+    )
+
+
+def build_truth(
+    run_id: str,
+    role: str,
+    executed: bool,
+    actual_where: dict[str, Any] | None,
+    actual_result: list[dict[str, Any]] | None,
+    returned_output: list[dict[str, Any]] | None,
+    note: str = "",
+) -> dict[str, Any]:
+    """R1 ground truth: separate real execution from returned output.
+
+    Written by the role that actually controls the query path, and reported to
+    the driver over the experiment side channel. For architecture D this side
+    channel is an explicitly-trusted TEST ORACLE, not a production observation
+    interface (see THREAT-MODEL.md / ARCHITECTURE-COMPARISON.md).
+    """
+    unauthorized_exec = bool(executed and actual_where != AUTHORIZED_WHERE)
+    unauthorized_disclosure = bool(returned_output) and not result_within_grant(returned_output)
+    actual_res_digest = digest_object(actual_result) if actual_result is not None else None
+    return {
+        "run_id": run_id,
+        "executor_role": role,
+        "executed": bool(executed),
+        "actual_query_where": copy.deepcopy(actual_where) if actual_where is not None else None,
+        "actual_query_result_digest": actual_res_digest,
+        "returned_output_digest": (
+            digest_object(returned_output) if returned_output is not None else None
+        ),
+        "actual_source_id": SOURCE_ID if executed else None,
+        "unauthorized_execution": unauthorized_exec,
+        "unauthorized_result_disclosure": unauthorized_disclosure,
+        # legacy aliases kept so older tooling keeps working
+        "result_digest": actual_res_digest,
+        "actual_where": copy.deepcopy(actual_where) if actual_where is not None else None,
+        "note": note,
+    }
